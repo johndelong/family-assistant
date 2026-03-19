@@ -6,25 +6,22 @@ Build a modular TypeScript-based household assistant platform that supports mult
 
 ## Core Philosophy
 
-- **Lean Core + Rich Extensions**: Keep the core orchestrator lightweight; capabilities ship as plugins
-- **Local-First**: Configuration via CLI and files, with optional UI later
+- **Lean Core + Clear Boundaries**: Keep the orchestrator small and the module seams explicit
+- **CLI-First**: Use the CLI as the primary management surface in v1
+- **Database as Source of Truth**: Persist authoritative state in PostgreSQL
 - **Explicit over Hidden**: Favor deterministic, traceable code over framework magic
-- **Terminal-First by Design**: CLI and file-based config ensure understanding and git-trackability
+- **Local-First**: Use exports and JSONL traces for portability and debugging without creating a second config authority
 
 ## Quick Architecture
 
-The platform follows a **lean core architecture** with four focused services running within a single Node.js process (v1):
+The platform uses a modular architecture within a single Node.js process in v1:
 
-1. **Gateway Service** - WebSocket entry point that manages connections, routes messages, and streams responses
-2. **Identity & Auth Service** - Security boundary that resolves identities, enforces pairing, and validates permissions
-3. **Orchestrator Service** - Lightweight coordinator that assembles context, executes tools, and invokes LLM providers
-4. **Memory Service** - Dual-storage persistence layer (PostgreSQL for durable memory, JSONL for execution traces)
-
-**Additional Components:**
-- **CLI + File-Based Configuration** - `family-assistant` CLI for all configuration with Git-trackable YAML/JSON files
-- **Admin UI (Optional, Future)** - Web interface consuming same APIs as CLI (post-v1)
-
-**Why Separate Services?** Clean architectural boundaries enable independent testing, evolution, and future deployment flexibility while maintaining operational simplicity in v1.
+1. **Gateway** - WebSocket first, with room for Telegram later
+2. **Identity and Authorization** - Maps channel identities to household members and enforces policy
+3. **Orchestrator** - Coordinates tools, integrations, and LLM providers
+4. **Memory** - PostgreSQL for durable state and JSONL for traces/replay
+5. **Integration Layer** - Person-scoped external connections behind a shared driver interface
+6. **CLI/Admin Surface** - Primary setup and management entry point
 
 ## Primary Goals
 
@@ -34,7 +31,7 @@ The platform follows a **lean core architecture** with four focused services run
 - Provide execution tracking and visualization for debugging and observability
 - Keep the architecture modular so components can be replaced or improved over time
 - Favor explicit, deterministic application logic over hidden agent abstractions
-- Lean core with plugin-based extensions
+- Lean core with a single tool runtime model
 - Make logging, traceability, and troubleshooting first-class concerns from the start
 - Secure secrets and credentials management
 - CLI-first, UI-later approach for faster v1 delivery
@@ -58,89 +55,49 @@ The platform follows a **lean core architecture** with four focused services run
 
 ### In v1
 
-**Core Platform**:
-- Single household with multiple persons
-- Four-service architecture (Gateway, Identity/Auth, Orchestrator, Memory)
-- Channel abstraction layer with WebSocket implementation
-- Identity pairing flow with 6-digit codes, 15-minute expiry, rate limiting
-- Capability-based dynamic permission system
-- Resource limits (request size, concurrency, rate limiting, timeouts)
-- PostgreSQL for durable memory (private/shared scopes)
-- JSONL for ephemeral session state (execution traces)
-- Session lifecycle management with file rotation
-- WebSocket-based real-time communication with event streaming
-- Request cancellation with AbortSignal propagation
-- Lifecycle event system with hook points
-- Structured logging with append-only JSONL execution logs
-- Multiple LLM providers: Anthropic (Claude), OpenAI (GPT), Ollama (local) with fallback chain
-- Self-configuration tools with four-tier permission model
-- AES-256-GCM credential encryption with key management
-- Credential redaction (secrets never logged)
-- CLI for all configuration and diagnostics
-- Config export/import (git-trackable YAML/JSON)
-- Hot reload dev mode
+- Multi-person household model
+- Identity pairing and channel identity mapping
+- Split authorization model:
+  - fixed core policy for platform actions
+  - dynamic capabilities for tool execution
+- Single runtime tool model
+- PostgreSQL-backed durable state
+- JSONL traces for debugging and replay
+- WebSocket channel first, with Telegram as a strong late-v1 candidate
+- Multiple LLM providers with fallback
+- Person-scoped integration connections
+- CLI-first management and diagnostics
+- Secure secret handling with encrypted-at-rest credentials
 
-**Tool System**:
-- **Plugins**: TypeScript tools (built-in + installable) running in-process
-  - Bundled core capabilities (memory, system health, person info)
-  - User-installable plugins via CLI (source: 'plugin')
-- **MCP Servers**: External integrations in any language via Model Context Protocol
-  - Per-person MCP server instances with credential isolation
-  - Universal capability discovery across all tool sources
-  - Dynamic, schema-driven permission grants
-  - Process isolation with verified MCP server allowlist (source: 'mcp')
-  - Community MCP servers (Google Calendar, GitHub, etc.)
+### Not required for the first solid v1
 
-### Not in v1
-
-- Admin UI (deferred to post-v1)
-- Container isolation for MCP servers (v1 uses process isolation)
-- Complex visualizations and analytics dashboards
-- Additional channels (Telegram, WhatsApp, SMS) - architecture ready
-- Tool development CLI helpers
-- Sub-agent architecture for autonomous workflows
-- Unverified/community MCP servers (v1 allowlist only)
-- Multi-tenant support
-- Voice input/output integration
+- Plugin marketplace
+- Long-lived per-person MCP server fleets
+- Full automation engine
+- Admin UI
+- Voice I/O
 - Horizontal scaling
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+ with npm or yarn
-- PostgreSQL 14+ (for durable memory storage)
-- Anthropic API key (or OpenAI key, or local Ollama instance)
+- Node.js 20+
+- PostgreSQL 14+
 
 ### Installation
 
 ```bash
-npm install -g family-assistant
+npm install
+npm run typecheck
+npm run start
 ```
-
-### Initial Configuration
-
-```bash
-# Initialize a new household
-family-assistant init
-
-# Add family members
-family-assistant person add --name "John" --role parent
-family-assistant person add --name "Sarah" --role parent
-
-# Configure LLM provider
-family-assistant llm add --provider anthropic --key YOUR_API_KEY
-```
-
-### First Interaction
-
-Connect via WebSocket and pair your channel identity using the 6-digit pairing code generated by the CLI. Once paired, send messages to the assistant and watch real-time execution events stream back.
 
 ## Documentation
 
-- **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - System design, four services, component interactions
-- **[TOOLS.md](./docs/TOOLS.md)** - Plugin and MCP tool architecture, capability discovery
-- **[SECURITY_MODEL.md](./docs/SECURITY_MODEL.md)** - Identity, pairing, capability-based permissions, encryption
+- **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - System design, channel layer, auth split, integration model
+- **[TOOLS.md](./docs/TOOLS.md)** - Single tool runtime model and integration-backed tools
+- **[SECURITY_MODEL.md](./docs/SECURITY_MODEL.md)** - Identity, pairing, core policy, capabilities, encryption
 - **[IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md)** - Development phases, dependencies, roadmap
 - **[PATTERNS.md](./docs/PATTERNS.md)** - Implementation patterns for tools, capabilities, and extensions
 - **[CLI_DESIGN.md](./docs/CLI_DESIGN.md)** - Complete command reference and configuration guide
