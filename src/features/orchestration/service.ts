@@ -57,40 +57,40 @@ export class OrchestrationService {
         };
       }
 
-      const result = await this.toolRegistry.execute("note.store", { content }, {
+      const result = await this.toolRegistry.execute("memory.store", { content, scope: "private" }, {
         requestId: input.requestId,
         invocationSource: "conversation",
         person: input.person
-      }) as { noteId: string; createdAt: string };
+      }) as { memoryId: string; createdAt: string };
 
       return {
         route: "tool_execution",
-        content: `I saved that note for you with id ${result.noteId} at ${result.createdAt}.`
+        content: `I saved that to your private memory with id ${result.memoryId} at ${result.createdAt}.`
       };
     }
 
     if (
-      normalizedText === "list my notes" ||
-      normalizedText === "show my notes" ||
+      normalizedText === "search my memory" ||
+      normalizedText === "show my memories" ||
       normalizedText === "what do you remember about me?"
     ) {
-      const result = await this.toolRegistry.execute("note.list", {}, {
+      const result = await this.toolRegistry.execute("memory.search", {}, {
         requestId: input.requestId,
         invocationSource: "conversation",
         person: input.person
-      }) as { notes: Array<{ content: string; createdAt: string }> };
+      }) as { memories: Array<{ scope: string; content: string; createdAt: string }> };
 
-      if (result.notes.length === 0) {
+      if (result.memories.length === 0) {
         return {
           route: "tool_execution",
-          content: "I do not have any notes stored for you yet."
+          content: "I do not have any memory stored for you yet."
         };
       }
 
-      const lines = result.notes.map((note, index) => `${index + 1}. ${note.content} (${note.createdAt})`);
+      const lines = result.memories.map((memory, index) => `${index + 1}. [${memory.scope}] ${memory.content} (${memory.createdAt})`);
       return {
         route: "tool_execution",
-        content: `Here are your recent notes:\n${lines.join("\n")}`
+        content: `Here is the memory I found for you:\n${lines.join("\n")}`
       };
     }
 
@@ -102,10 +102,11 @@ export class OrchestrationService {
     }
 
     if (this.llmService) {
-      const response = await this.llmService.respond({
+      const response = await this.llmService.respondWithTools({
         requestId: input.requestId,
         person: input.person,
-        message: input.message
+        message: input.message,
+        toolRegistry: this.toolRegistry
       });
 
       return {

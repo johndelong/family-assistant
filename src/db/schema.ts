@@ -57,9 +57,11 @@ export const integrationConnections = pgTable("integration_connections", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
 });
 
-export const notes = pgTable("notes", {
+export const memoryEntries = pgTable("memory_entries", {
   id: uuid("id").primaryKey(),
-  personId: uuid("person_id").notNull().references(() => persons.id),
+  householdId: uuid("household_id").notNull().references(() => households.id),
+  personId: uuid("person_id").references(() => persons.id),
+  scope: varchar("scope", { length: 32 }).notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
 });

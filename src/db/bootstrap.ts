@@ -86,9 +86,11 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
   `);
 
   await db.execute(sql`
-    create table if not exists notes (
+    create table if not exists memory_entries (
       id uuid primary key,
-      person_id uuid not null references persons(id),
+      household_id uuid not null references households(id),
+      person_id uuid references persons(id),
+      scope varchar(32) not null,
       content text not null,
       created_at timestamptz not null
     )

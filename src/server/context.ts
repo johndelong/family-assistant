@@ -8,13 +8,13 @@ import { IdentityRepository } from "../features/identity/repository.js";
 import { IdentityResolutionService } from "../features/identity/service.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
-import { NotesRepository } from "../features/notes/repository.js";
+import { MemoryRepository } from "../features/memory/repository.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
 import { PersonRepository } from "../features/persons/repository.js";
 import { RequestIntakeService } from "../features/requests/service.js";
 import { TraceWriter } from "../features/tracing/writer.js";
-import { createNoteListTool } from "../features/tools/note-list-tool.js";
-import { createNoteStoreTool } from "../features/tools/note-store-tool.js";
+import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
+import { createMemoryStoreTool } from "../features/tools/memory-store-tool.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 
 export interface ServerContext {
@@ -51,10 +51,10 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const households = new HouseholdRepository(db);
   const persons = new PersonRepository(db);
   const identities = new IdentityRepository(db);
-  const notes = new NotesRepository(db);
+  const memory = new MemoryRepository(db);
   const identityResolution = new IdentityResolutionService(identities, persons);
-  toolRegistry.register(createNoteStoreTool(notes));
-  toolRegistry.register(createNoteListTool(notes));
+  toolRegistry.register(createMemoryStoreTool(memory));
+  toolRegistry.register(createMemorySearchTool(memory));
   const llmService = config.openAiApiKey
     ? new LlmService(new OpenAiProvider({
         apiKey: config.openAiApiKey,

@@ -11,6 +11,12 @@ export const systemHealthTool: Tool<Record<string, never>, SystemHealthResult> =
   id: "system.health",
   description: "Return basic system health for the assistant service",
   inputSchema: z.object({}),
+  inputJsonSchema: {
+    type: "object",
+    properties: {},
+    required: [],
+    additionalProperties: false
+  },
   requiredCapabilities: [],
   exposure: "conversation",
   approvalPolicy: "never",

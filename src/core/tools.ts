@@ -15,6 +15,7 @@ export interface Tool<TInput, TOutput> {
   id: string;
   description: string;
   inputSchema: ZodSchema<TInput>;
+  inputJsonSchema?: Record<string, unknown>;
   requiredCapabilities?: string[];
   exposure: ToolExposure;
   approvalPolicy: ApprovalPolicy;
@@ -35,6 +36,10 @@ export class ToolRegistry {
 
   list(): Tool<unknown, unknown>[] {
     return Array.from(this.#tools.values());
+  }
+
+  listConversationTools(): Tool<unknown, unknown>[] {
+    return this.list().filter((tool) => tool.exposure === "conversation");
   }
 
   async execute(toolId: string, input: unknown, context: RequestContext): Promise<unknown> {

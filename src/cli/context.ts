@@ -6,14 +6,14 @@ import { HouseholdRepository } from "../features/households/repository.js";
 import { IdentityRepository } from "../features/identity/repository.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
-import { NotesRepository } from "../features/notes/repository.js";
+import { MemoryRepository } from "../features/memory/repository.js";
 import { PersonRepository } from "../features/persons/repository.js";
 import { RequestIntakeService } from "../features/requests/service.js";
 import { IdentityResolutionService } from "../features/identity/service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
 import { TraceWriter } from "../features/tracing/writer.js";
-import { createNoteListTool } from "../features/tools/note-list-tool.js";
-import { createNoteStoreTool } from "../features/tools/note-store-tool.js";
+import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
+import { createMemoryStoreTool } from "../features/tools/memory-store-tool.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 import type { AppConfig } from "../shared/config.js";
 
@@ -35,10 +35,10 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   await ensureSchema(db);
 
   const toolRegistry = new ToolRegistry();
-  const notes = new NotesRepository(db);
+  const memory = new MemoryRepository(db);
   toolRegistry.register(systemHealthTool);
-  toolRegistry.register(createNoteStoreTool(notes));
-  toolRegistry.register(createNoteListTool(notes));
+  toolRegistry.register(createMemoryStoreTool(memory));
+  toolRegistry.register(createMemorySearchTool(memory));
 
   const persons = new PersonRepository(db);
   const identities = new IdentityRepository(db);
