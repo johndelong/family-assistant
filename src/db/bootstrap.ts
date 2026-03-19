@@ -97,6 +97,58 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
   `);
 
   await db.execute(sql`
+    create table if not exists assistant_profiles (
+      key varchar(64) primary key,
+      instructions text not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    create table if not exists household_profiles (
+      household_id uuid primary key references households(id),
+      instructions text not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    create table if not exists person_profiles (
+      person_id uuid primary key references persons(id),
+      instructions text not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    create table if not exists conversation_sessions (
+      id uuid primary key,
+      person_id uuid not null references persons(id),
+      channel_type varchar(32) not null,
+      external_user_id text not null,
+      chat_id text,
+      summary text,
+      created_at timestamptz not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    create unique index if not exists conversation_sessions_person_channel_external_chat_idx
+      on conversation_sessions(person_id, channel_type, external_user_id, coalesce(chat_id, ''))
+  `);
+
+  await db.execute(sql`
+    create table if not exists session_messages (
+      id uuid primary key,
+      session_id uuid not null references conversation_sessions(id),
+      role varchar(32) not null,
+      content text not null,
+      created_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
     create table if not exists tool_capabilities (
       capability_name varchar(200) primary key,
       tool_id varchar(200) not null,

@@ -9,12 +9,23 @@ import { IdentityResolutionService } from "../features/identity/service.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
 import { MemoryRepository } from "../features/memory/repository.js";
+import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
 import { PersonRepository } from "../features/persons/repository.js";
+import { PromptProfileService } from "../features/profiles/prompt-profile-service.js";
+import { ProfileRepository } from "../features/profiles/repository.js";
 import { RequestIntakeService } from "../features/requests/service.js";
+import { SessionRepository } from "../features/sessions/repository.js";
+import { LlmSessionSummarizer } from "../features/sessions/llm-session-summarizer.js";
+import { SessionService } from "../features/sessions/service.js";
 import { TraceWriter } from "../features/tracing/writer.js";
 import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
 import { createMemoryStoreTool } from "../features/tools/memory-store-tool.js";
+import {
+  createAssistantProfileSetTool,
+  createHouseholdProfileSetTool,
+  createPersonProfileSetTool
+} from "../features/tools/profile-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 
 export interface ServerContext {
@@ -52,16 +63,28 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const persons = new PersonRepository(db);
   const identities = new IdentityRepository(db);
   const memory = new MemoryRepository(db);
+  const memoryRetrieval = new MemoryRetrievalService(memory);
+  const profiles = new ProfileRepository(db);
+  const promptProfiles = new PromptProfileService(profiles);
+  const sessions = new SessionRepository(db);
   const identityResolution = new IdentityResolutionService(identities, persons);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
-  const llmService = config.openAiApiKey
-    ? new LlmService(new OpenAiProvider({
+  toolRegistry.register(createPersonProfileSetTool(profiles));
+  toolRegistry.register(createHouseholdProfileSetTool(profiles));
+  toolRegistry.register(createAssistantProfileSetTool(profiles));
+  const provider = config.openAiApiKey
+    ? new OpenAiProvider({
         apiKey: config.openAiApiKey,
         model: config.openAiModel
-      }))
+      })
     : undefined;
-  const orchestration = new OrchestrationService(toolRegistry, llmService);
+  const llmService = provider ? new LlmService(provider) : undefined;
+  const sessionService = new SessionService(
+    sessions,
+    provider ? new LlmSessionSummarizer(provider) : undefined
+  );
+  const orchestration = new OrchestrationService(toolRegistry, llmService, memoryRetrieval, promptProfiles, sessionService);
   const traceWriter = new TraceWriter(config.dataDir);
   const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter);
 

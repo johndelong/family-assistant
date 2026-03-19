@@ -66,7 +66,11 @@ export class RequestIntakeService {
         requestId: input.requestId,
         stage: response.model ? "llm.invoked" : "request.completed",
         payload: response.model ? {
-          model: response.model
+          model: response.model,
+          usedTools: response.trace?.usedTools ?? [],
+          relevantMemories: summarizeRelevantMemories(response.trace?.relevantMemories ?? []),
+          profileContext: summarizeProfileContext(response.trace?.profileContext),
+          sessionContext: summarizeSessionContext(response.trace?.sessionContext)
         } : {
           outcome: "completed",
           route: response.route
@@ -134,4 +138,71 @@ export class RequestIntakeService {
       message: `Identity not linked. Pair this sender with: family-assistant identity pair --code ${resolution.pairingRequest.code} --person <person-id-or-name>`
     };
   }
+}
+
+function summarizeRelevantMemories(memories: Array<{
+  id: string;
+  scope: "private" | "shared";
+  content: string;
+  createdAt: string;
+}>): Array<{
+  id: string;
+  scope: "private" | "shared";
+  createdAt: string;
+  preview: string;
+}> {
+  return memories.map((memory) => ({
+    id: memory.id,
+    scope: memory.scope,
+    createdAt: memory.createdAt,
+    preview: memory.content.length > 120 ? `${memory.content.slice(0, 117)}...` : memory.content
+  }));
+}
+
+function summarizeProfileContext(profileContext: {
+  assistantStyle: string;
+  householdPreferences?: string;
+  personPreferences?: string;
+} | undefined): {
+  assistantStylePreview: string;
+  householdPreferencesPreview?: string;
+  personPreferencesPreview?: string;
+} | undefined {
+  if (!profileContext) {
+    return undefined;
+  }
+
+  return {
+    assistantStylePreview: summarizeText(profileContext.assistantStyle),
+    ...(profileContext.householdPreferences
+      ? { householdPreferencesPreview: summarizeText(profileContext.householdPreferences) }
+      : {}),
+    ...(profileContext.personPreferences
+      ? { personPreferencesPreview: summarizeText(profileContext.personPreferences) }
+      : {})
+  };
+}
+
+function summarizeText(value: string): string {
+  return value.length > 160 ? `${value.slice(0, 157)}...` : value;
+}
+
+function summarizeSessionContext(sessionContext: {
+  summary?: string;
+  recentMessages: Array<{ role: "user" | "assistant"; content: string }>;
+} | undefined): {
+  summaryPreview?: string;
+  recentMessages: Array<{ role: "user" | "assistant"; preview: string }>;
+} | undefined {
+  if (!sessionContext) {
+    return undefined;
+  }
+
+  return {
+    ...(sessionContext.summary ? { summaryPreview: summarizeText(sessionContext.summary) } : {}),
+    recentMessages: sessionContext.recentMessages.map((message) => ({
+      role: message.role,
+      preview: summarizeText(message.content)
+    }))
+  };
 }

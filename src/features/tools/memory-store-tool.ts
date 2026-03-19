@@ -17,7 +17,7 @@ type MemoryStoreInput = {
 export function createMemoryStoreTool(memoryRepository: MemoryRepository): Tool<MemoryStoreInput, MemoryStoreResult> {
   return {
     id: "memory.store",
-    description: "Store personal or shared household context as assistant memory",
+    description: "Store durable assistant memory. Use private for person-specific context and shared for household-wide context.",
     inputSchema: z.object({
       content: z.string().min(1),
       scope: z.enum(["private", "shared"]).optional()
@@ -32,7 +32,7 @@ export function createMemoryStoreTool(memoryRepository: MemoryRepository): Tool<
         scope: {
           type: "string",
           enum: ["private", "shared"],
-          description: "Whether the memory is private to the person or shared with the household"
+          description: "Use 'private' for one person's preferences or facts, and 'shared' for household routines, schedules, or family-wide context"
         }
       },
       required: ["content", "scope"],

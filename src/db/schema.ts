@@ -66,6 +66,43 @@ export const memoryEntries = pgTable("memory_entries", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
 });
 
+export const assistantProfiles = pgTable("assistant_profiles", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  instructions: text("instructions").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const householdProfiles = pgTable("household_profiles", {
+  householdId: uuid("household_id").primaryKey().references(() => households.id),
+  instructions: text("instructions").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const personProfiles = pgTable("person_profiles", {
+  personId: uuid("person_id").primaryKey().references(() => persons.id),
+  instructions: text("instructions").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const conversationSessions = pgTable("conversation_sessions", {
+  id: uuid("id").primaryKey(),
+  personId: uuid("person_id").notNull().references(() => persons.id),
+  channelType: varchar("channel_type", { length: 32 }).notNull(),
+  externalUserId: text("external_user_id").notNull(),
+  chatId: text("chat_id"),
+  summary: text("summary"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const sessionMessages = pgTable("session_messages", {
+  id: uuid("id").primaryKey(),
+  sessionId: uuid("session_id").notNull().references(() => conversationSessions.id),
+  role: varchar("role", { length: 32 }).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+});
+
 export const toolCapabilities = pgTable("tool_capabilities", {
   capabilityName: varchar("capability_name", { length: 200 }).primaryKey(),
   toolId: varchar("tool_id", { length: 200 }).notNull(),

@@ -258,6 +258,98 @@ function buildProgram(): Command {
       }
     });
 
+  const profile = program.command("profile").description("Manage prompt profiles for the assistant, household, and people");
+
+  profile
+    .command("assistant-show")
+    .description("Show the current assistant profile")
+    .action(async () => {
+      const record = await withContext((ctx) => ctx.profiles.getAssistantProfile());
+      console.log(record.instructions);
+    });
+
+  profile
+    .command("assistant-set")
+    .argument("<instructions>", "Assistant profile instructions")
+    .description("Set the global assistant profile")
+    .action(async (instructions: string) => {
+      const record = await withContext((ctx) => ctx.profiles.setAssistantProfile(instructions.trim()));
+      console.log(`Updated assistant profile at ${record.updatedAt.toISOString()}`);
+    });
+
+  profile
+    .command("household-show")
+    .requiredOption("--household <householdId>", "Household ID")
+    .description("Show the household profile")
+    .action(async (options: { household: string }) => {
+      const record = await withContext((ctx) => ctx.profiles.getHouseholdProfile(options.household));
+
+      if (!record) {
+        console.log("No household profile set.");
+        return;
+      }
+
+      console.log(record.instructions);
+    });
+
+  profile
+    .command("household-set")
+    .requiredOption("--household <householdId>", "Household ID")
+    .argument("<instructions>", "Household profile instructions")
+    .description("Set the household profile")
+    .action(async (instructions: string, options: { household: string }) => {
+      const record = await withContext(async (ctx) => {
+        const householdRecord = await ctx.households.findById(options.household);
+        if (!householdRecord) {
+          throw new Error(`Household not found: ${options.household}`);
+        }
+
+        return ctx.profiles.setHouseholdProfile(options.household, instructions.trim());
+      });
+
+      console.log(`Updated household profile for ${record.householdId} at ${record.updatedAt.toISOString()}`);
+    });
+
+  profile
+    .command("person-show")
+    .requiredOption("--person <personRef>", "Person ID or exact name")
+    .description("Show the person profile")
+    .action(async (options: { person: string }) => {
+      const record = await withContext(async (ctx) => {
+        const personRecord = (await ctx.persons.findById(options.person)) ?? (await ctx.persons.findByName(options.person));
+        if (!personRecord) {
+          throw new Error(`Person not found: ${options.person}`);
+        }
+
+        return ctx.profiles.getPersonProfile(personRecord.id);
+      });
+
+      if (!record) {
+        console.log("No person profile set.");
+        return;
+      }
+
+      console.log(record.instructions);
+    });
+
+  profile
+    .command("person-set")
+    .requiredOption("--person <personRef>", "Person ID or exact name")
+    .argument("<instructions>", "Person profile instructions")
+    .description("Set the person profile")
+    .action(async (instructions: string, options: { person: string }) => {
+      const record = await withContext(async (ctx) => {
+        const personRecord = (await ctx.persons.findById(options.person)) ?? (await ctx.persons.findByName(options.person));
+        if (!personRecord) {
+          throw new Error(`Person not found: ${options.person}`);
+        }
+
+        return ctx.profiles.setPersonProfile(personRecord.id, instructions.trim());
+      });
+
+      console.log(`Updated person profile for ${record.personId} at ${record.updatedAt.toISOString()}`);
+    });
+
   const trace = program.command("trace").description("Inspect request traces");
 
   trace
