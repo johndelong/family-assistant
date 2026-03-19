@@ -80,16 +80,16 @@ The platform follows a **lean core architecture** with four focused services run
 - Config export/import (git-trackable YAML/JSON)
 - Hot reload dev mode
 
-**Tool System (Three-Tier Architecture)**:
-- **Bundled Tools**: Core platform capabilities (5-10 tools)
-  - Memory search/store, system health, person info
-- **MCP Integration**: Model Context Protocol for external services
+**Tool System**:
+- **Plugins**: TypeScript tools (built-in + installable) running in-process
+  - Bundled core capabilities (memory, system health, person info)
+  - User-installable plugins via CLI (source: 'plugin')
+- **MCP Servers**: External integrations in any language via Model Context Protocol
   - Per-person MCP server instances with credential isolation
   - Universal capability discovery across all tool sources
   - Dynamic, schema-driven permission grants
-  - Process isolation with verified MCP server allowlist
-  - Install community MCP servers (Google Calendar, GitHub, etc.)
-- **Adapter-Based Tools**: Optional for special cases requiring bidirectional communication
+  - Process isolation with verified MCP server allowlist (source: 'mcp')
+  - Community MCP servers (Google Calendar, GitHub, etc.)
 
 ### Not in v1
 
@@ -139,7 +139,7 @@ Connect via WebSocket and pair your channel identity using the 6-digit pairing c
 ## Documentation
 
 - **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - System design, four services, component interactions
-- **[TOOLS.md](./docs/TOOLS.md)** - Three-tier tool architecture, MCP integration, capability discovery
+- **[TOOLS.md](./docs/TOOLS.md)** - Plugin and MCP tool architecture, capability discovery
 - **[SECURITY_MODEL.md](./docs/SECURITY_MODEL.md)** - Identity, pairing, capability-based permissions, encryption
 - **[IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md)** - Development phases, dependencies, roadmap
 - **[PATTERNS.md](./docs/PATTERNS.md)** - Implementation patterns for tools, capabilities, and extensions
