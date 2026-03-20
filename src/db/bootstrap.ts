@@ -81,8 +81,43 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
   `);
 
   await db.execute(sql`
-    create unique index if not exists integration_connections_person_integration_idx
+    drop index if exists integration_connections_person_integration_idx
+  `);
+
+  await db.execute(sql`
+    create index if not exists integration_connections_person_integration_idx
       on integration_connections(person_id, integration_key)
+  `);
+
+  await db.execute(sql`
+    create table if not exists integration_exposed_tools (
+      id uuid primary key,
+      connection_id uuid not null references integration_connections(id),
+      tool_name varchar(200) not null,
+      description text not null,
+      input_json_schema jsonb not null,
+      enabled varchar(10) not null,
+      created_at timestamptz not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    create unique index if not exists integration_exposed_tools_connection_tool_name_idx
+      on integration_exposed_tools(connection_id, tool_name)
+  `);
+
+  await db.execute(sql`
+    create table if not exists connection_tool_grants (
+      connection_id uuid not null references integration_connections(id),
+      tool_id uuid not null references integration_exposed_tools(id),
+      owner_id uuid not null references persons(id),
+      grantee_id uuid not null references persons(id),
+      granted_by uuid references persons(id),
+      granted_at timestamptz not null,
+      expires_at timestamptz,
+      primary key (connection_id, tool_id, owner_id, grantee_id)
+    )
   `);
 
   await db.execute(sql`

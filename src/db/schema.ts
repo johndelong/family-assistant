@@ -57,6 +57,29 @@ export const integrationConnections = pgTable("integration_connections", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
 });
 
+export const integrationExposedTools = pgTable("integration_exposed_tools", {
+  id: uuid("id").primaryKey(),
+  connectionId: uuid("connection_id").notNull().references(() => integrationConnections.id),
+  toolName: varchar("tool_name", { length: 200 }).notNull(),
+  description: text("description").notNull(),
+  inputJsonSchema: jsonb("input_json_schema").notNull(),
+  enabled: varchar("enabled", { length: 10 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const connectionToolGrants = pgTable("connection_tool_grants", {
+  connectionId: uuid("connection_id").notNull().references(() => integrationConnections.id),
+  toolId: uuid("tool_id").notNull().references(() => integrationExposedTools.id),
+  ownerId: uuid("owner_id").notNull().references(() => persons.id),
+  granteeId: uuid("grantee_id").notNull().references(() => persons.id),
+  grantedBy: uuid("granted_by").references(() => persons.id),
+  grantedAt: timestamp("granted_at", { withTimezone: true }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+}, (table) => ({
+  pk: primaryKey({ columns: [table.connectionId, table.toolId, table.ownerId, table.granteeId] })
+}));
+
 export const memoryEntries = pgTable("memory_entries", {
   id: uuid("id").primaryKey(),
   householdId: uuid("household_id").notNull().references(() => households.id),

@@ -6,6 +6,9 @@ import { HouseholdRepository } from "../features/households/repository.js";
 import { IdentityRepository } from "../features/identity/repository.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
+import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-tools.js";
+import { IntegrationRepository } from "../features/integrations/repository.js";
+import { McpStdioClient } from "../features/integrations/mcp-stdio-client.js";
 import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { PersonRepository } from "../features/persons/repository.js";
@@ -34,6 +37,7 @@ export interface CliContext {
   households: HouseholdRepository;
   persons: PersonRepository;
   identities: IdentityRepository;
+  integrations: IntegrationRepository;
   profiles: ProfileRepository;
   requestIntake: RequestIntakeService;
 }
@@ -50,6 +54,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const memory = new MemoryRepository(db);
   const memoryRetrieval = new MemoryRetrievalService(memory);
   const profiles = new ProfileRepository(db);
+  const integrations = new IntegrationRepository(db);
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   toolRegistry.register(systemHealthTool);
@@ -58,6 +63,11 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   toolRegistry.register(createPersonProfileSetTool(profiles));
   toolRegistry.register(createHouseholdProfileSetTool(profiles));
   toolRegistry.register(createAssistantProfileSetTool(profiles));
+  await registerDynamicMcpTools({
+    integrations,
+    mcpClient: new McpStdioClient(),
+    register: (tool) => toolRegistry.register(tool)
+  });
 
   const persons = new PersonRepository(db);
   const identities = new IdentityRepository(db);
@@ -82,6 +92,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
     households: new HouseholdRepository(db),
     persons,
     identities,
+    integrations,
     profiles,
     requestIntake,
     async close() {

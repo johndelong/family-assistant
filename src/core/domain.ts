@@ -64,6 +64,27 @@ export interface IntegrationConnection {
   updatedAt: Date;
 }
 
+export interface IntegrationExposedTool {
+  id: string;
+  connectionId: string;
+  toolName: string;
+  description: string;
+  inputJsonSchema: Record<string, unknown>;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ConnectionToolGrant {
+  connectionId: string;
+  toolId: string;
+  ownerId: string;
+  granteeId: string;
+  grantedBy?: string;
+  grantedAt: Date;
+  expiresAt?: Date;
+}
+
 export interface EncryptedSecret {
   ciphertext: string;
   iv: string;

@@ -4,6 +4,7 @@ import { Command, InvalidArgumentError } from "commander";
 import { TraceRepository } from "../features/tracing/repository.js";
 import { formatAcceptedRequestForUser } from "../features/requests/formatter.js";
 import type { ChannelType, PersonRole } from "../core/domain.js";
+import { McpStdioClient } from "../features/integrations/mcp-stdio-client.js";
 import { createCliContext } from "./context.js";
 import { loadAppConfig } from "../shared/config.js";
 
@@ -26,6 +27,50 @@ function parseChannel(value: string): ChannelType {
   throw new InvalidArgumentError(`Channel must be one of: ${validChannels.join(", ")}`);
 }
 
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Expected a JSON object");
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new InvalidArgumentError(`Expected valid JSON object: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function parseJsonStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+      throw new Error("Expected a JSON array of strings");
+    }
+
+    return parsed;
+  } catch (error) {
+    throw new InvalidArgumentError(`Expected valid JSON string array: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function parseJsonStringRecord(value: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      Object.values(parsed).some((item) => typeof item !== "string")
+    ) {
+      throw new Error("Expected a JSON object with string values");
+    }
+
+    return parsed as Record<string, string>;
+  } catch (error) {
+    throw new InvalidArgumentError(`Expected valid JSON string object: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function withContext<T>(action: (ctx: Awaited<ReturnType<typeof createCliContext>>) => Promise<T>): Promise<T> {
   const config = loadAppConfig();
   const context = await createCliContext(config);
@@ -35,6 +80,21 @@ async function withContext<T>(action: (ctx: Awaited<ReturnType<typeof createCliC
   } finally {
     await context.close();
   }
+}
+
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function findPersonByRef(
+  ctx: Awaited<ReturnType<typeof createCliContext>>,
+  personRef: string
+) {
+  if (isUuidLike(personRef)) {
+    return ctx.persons.findById(personRef);
+  }
+
+  return ctx.persons.findByName(personRef);
 }
 
 function buildProgram(): Command {
@@ -206,7 +266,7 @@ function buildProgram(): Command {
           throw new Error(`Pending pairing request not found for code ${options.code}`);
         }
 
-        const personRecord = (await ctx.persons.findById(options.person)) ?? (await ctx.persons.findByName(options.person));
+        const personRecord = await findPersonByRef(ctx, options.person);
         if (!personRecord) {
           throw new Error(`Person not found: ${options.person}`);
         }
@@ -316,7 +376,7 @@ function buildProgram(): Command {
     .description("Show the person profile")
     .action(async (options: { person: string }) => {
       const record = await withContext(async (ctx) => {
-        const personRecord = (await ctx.persons.findById(options.person)) ?? (await ctx.persons.findByName(options.person));
+        const personRecord = await findPersonByRef(ctx, options.person);
         if (!personRecord) {
           throw new Error(`Person not found: ${options.person}`);
         }
@@ -339,7 +399,7 @@ function buildProgram(): Command {
     .description("Set the person profile")
     .action(async (instructions: string, options: { person: string }) => {
       const record = await withContext(async (ctx) => {
-        const personRecord = (await ctx.persons.findById(options.person)) ?? (await ctx.persons.findByName(options.person));
+        const personRecord = await findPersonByRef(ctx, options.person);
         if (!personRecord) {
           throw new Error(`Person not found: ${options.person}`);
         }
@@ -348,6 +408,317 @@ function buildProgram(): Command {
       });
 
       console.log(`Updated person profile for ${record.personId} at ${record.updatedAt.toISOString()}`);
+    });
+
+  const integration = program.command("integration").description("Manage integration connections, exposed tools, and grants");
+
+  integration
+    .command("connect-mcp")
+    .requiredOption("--person <personRef>", "Person ID or exact name")
+    .requiredOption("--key <integrationKey>", "Integration key, for example google_workspace")
+    .option("--account-label <label>", "Human-friendly account label")
+    .option("--server-ref <serverRef>", "MCP server reference or identifier")
+    .requiredOption("--command <command>", "Command used to launch the MCP server")
+    .option("--args <json>", "JSON array of command args", "[]")
+    .option("--cwd <path>", "Optional working directory for the MCP server")
+    .option("--env <json>", "JSON object of environment variables", "{}")
+    .description("Create a person-owned MCP integration connection placeholder")
+    .action(async (options: {
+      person: string;
+      key: string;
+      accountLabel?: string;
+      serverRef?: string;
+      command: string;
+      args: string;
+      cwd?: string;
+      env: string;
+    }) => {
+      const args = parseJsonStringArray(options.args);
+      const env = parseJsonStringRecord(options.env);
+      const connection = await withContext(async (ctx) => {
+        const personRecord = await findPersonByRef(ctx, options.person);
+        if (!personRecord) {
+          throw new Error(`Person not found: ${options.person}`);
+        }
+
+        return ctx.integrations.createMcpConnection({
+          personId: personRecord.id,
+          integrationKey: options.key,
+          metadata: {
+            command: options.command,
+            args,
+            ...(options.cwd ? { cwd: options.cwd } : {}),
+            ...(Object.keys(env).length > 0 ? { env } : {}),
+            ...(options.accountLabel ? { accountLabel: options.accountLabel } : {}),
+            ...(options.serverRef ? { serverRef: options.serverRef } : {})
+          }
+        });
+      });
+
+      console.log(`Created MCP connection ${connection.id} for person ${connection.personId} (${connection.integrationKey})`);
+    });
+
+  integration
+    .command("list")
+    .description("List integration connections")
+    .action(async () => {
+      const connections = await withContext((ctx) => ctx.integrations.listConnections());
+
+      if (connections.length === 0) {
+        console.log("No integration connections found.");
+        return;
+      }
+
+      for (const connection of connections) {
+        console.log(`${connection.id}  owner=${connection.personId}  key=${connection.integrationKey}  driver=${connection.driverType}  status=${connection.status}`);
+      }
+    });
+
+  const integrationTool = integration.command("tool").description("Manage dynamically exposed integration tools");
+
+  integrationTool
+    .command("discover")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .description("Discover tools from an MCP server and import them into the registry")
+    .action(async (options: { connection: string }) => {
+      const imported = await withContext(async (ctx) => {
+        const connection = await ctx.integrations.findConnectionById(options.connection);
+        if (!connection) {
+          throw new Error(`Connection not found: ${options.connection}`);
+        }
+
+        const metadata = connection.metadata ?? {};
+        const command = metadata.command;
+        const args = metadata.args;
+        const cwd = metadata.cwd;
+        const env = metadata.env;
+        if (typeof command !== "string" || command.trim().length === 0) {
+          throw new Error("Connection is missing metadata.command");
+        }
+
+        if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
+          throw new Error("Connection metadata.args must be a string array when present");
+        }
+
+        if (cwd !== undefined && typeof cwd !== "string") {
+          throw new Error("Connection metadata.cwd must be a string when present");
+        }
+
+        if (
+          env !== undefined &&
+          (
+            typeof env !== "object" ||
+            env === null ||
+            Array.isArray(env) ||
+            Object.values(env).some((value) => typeof value !== "string")
+          )
+        ) {
+          throw new Error("Connection metadata.env must be a string object when present");
+        }
+
+        const client = new McpStdioClient();
+        const tools = await client.listTools({
+          command,
+          ...(Array.isArray(args) ? { args: args as string[] } : {}),
+          ...(typeof cwd === "string" ? { cwd } : {}),
+          ...(env ? { env: env as Record<string, string> } : {})
+        });
+
+        const importedTools = [];
+        for (const tool of tools) {
+          importedTools.push(await ctx.integrations.upsertExposedTool({
+            connectionId: connection.id,
+            toolName: tool.name,
+            description: tool.description ?? `Imported MCP tool ${tool.name}`,
+            inputJsonSchema: tool.inputSchema ?? {
+              type: "object",
+              properties: {},
+              required: [],
+              additionalProperties: true
+            }
+          }));
+        }
+
+        return importedTools;
+      });
+
+      if (imported.length === 0) {
+        console.log("No MCP tools discovered.");
+        return;
+      }
+
+      for (const tool of imported) {
+        console.log(`Imported ${tool.toolName} -> ${tool.id}`);
+      }
+    });
+
+  integrationTool
+    .command("register")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .requiredOption("--name <toolName>", "External MCP tool name")
+    .requiredOption("--description <description>", "Tool description")
+    .option("--schema <json>", "JSON schema object for tool input", "{}")
+    .description("Register or update an exposed tool for a connection")
+    .action(async (options: {
+      connection: string;
+      name: string;
+      description: string;
+      schema: string;
+    }) => {
+      const schema = parseJsonObject(options.schema);
+      const tool = await withContext(async (ctx) => {
+        const connection = await ctx.integrations.findConnectionById(options.connection);
+        if (!connection) {
+          throw new Error(`Connection not found: ${options.connection}`);
+        }
+
+        return ctx.integrations.upsertExposedTool({
+          connectionId: connection.id,
+          toolName: options.name,
+          description: options.description,
+          inputJsonSchema: schema
+        });
+      });
+
+      console.log(`Registered tool ${tool.toolName} on connection ${tool.connectionId}`);
+    });
+
+  integrationTool
+    .command("list")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .description("List exposed tools for a connection")
+    .action(async (options: { connection: string }) => {
+      const tools = await withContext((ctx) => ctx.integrations.listExposedTools(options.connection));
+
+      if (tools.length === 0) {
+        console.log("No exposed tools found.");
+        return;
+      }
+
+      for (const tool of tools) {
+        console.log(`${tool.id}  ${tool.toolName}  enabled=${tool.enabled}`);
+      }
+    });
+
+  integrationTool
+    .command("call")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .requiredOption("--name <toolName>", "Tool name on that connection")
+    .option("--input <json>", "JSON object input for the tool", "{}")
+    .description("Directly invoke a discovered MCP tool for testing or auth setup")
+    .action(async (options: { connection: string; name: string; input: string }) => {
+      const inputValue = parseJsonObject(options.input);
+      const result = await withContext(async (ctx) => {
+        const connection = await ctx.integrations.findConnectionById(options.connection);
+        if (!connection) {
+          throw new Error(`Connection not found: ${options.connection}`);
+        }
+
+        const metadata = connection.metadata ?? {};
+        const command = metadata.command;
+        const args = metadata.args;
+        const cwd = metadata.cwd;
+        const env = metadata.env;
+        if (typeof command !== "string" || command.trim().length === 0) {
+          throw new Error("Connection is missing metadata.command");
+        }
+
+        if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
+          throw new Error("Connection metadata.args must be a string array when present");
+        }
+
+        if (cwd !== undefined && typeof cwd !== "string") {
+          throw new Error("Connection metadata.cwd must be a string when present");
+        }
+
+        if (
+          env !== undefined &&
+          (
+            typeof env !== "object" ||
+            env === null ||
+            Array.isArray(env) ||
+            Object.values(env).some((value) => typeof value !== "string")
+          )
+        ) {
+          throw new Error("Connection metadata.env must be a string object when present");
+        }
+
+        const client = new McpStdioClient();
+        return client.callTool({
+          command,
+          ...(Array.isArray(args) ? { args: args as string[] } : {}),
+          ...(typeof cwd === "string" ? { cwd } : {}),
+          ...(env ? { env: env as Record<string, string> } : {})
+        }, {
+          name: options.name,
+          arguments: inputValue
+        });
+      });
+
+      console.log(JSON.stringify(result, null, 2));
+    });
+
+  integration
+    .command("grant")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .requiredOption("--tool <toolName>", "Tool name on that connection")
+    .requiredOption("--to <personRef>", "Grantee person ID or exact name")
+    .option("--granted-by <personRef>", "Granting person ID or exact name")
+    .description("Grant a single exposed connection tool to another household member")
+    .action(async (options: { connection: string; tool: string; to: string; grantedBy?: string }) => {
+      const grant = await withContext(async (ctx) => {
+        const connection = await ctx.integrations.findConnectionById(options.connection);
+        if (!connection) {
+          throw new Error(`Connection not found: ${options.connection}`);
+        }
+
+        const tool = await ctx.integrations.findExposedTool(connection.id, options.tool);
+        if (!tool) {
+          throw new Error(`Tool not found on connection: ${options.tool}`);
+        }
+
+        const grantee = await findPersonByRef(ctx, options.to);
+        if (!grantee) {
+          throw new Error(`Person not found: ${options.to}`);
+        }
+
+        let grantedBy: string | undefined;
+        if (options.grantedBy) {
+          const granter = await findPersonByRef(ctx, options.grantedBy);
+          if (!granter) {
+            throw new Error(`Granting person not found: ${options.grantedBy}`);
+          }
+
+          grantedBy = granter.id;
+        }
+
+        return ctx.integrations.grantToolAccess({
+          connectionId: connection.id,
+          toolId: tool.id,
+          ownerId: connection.personId,
+          granteeId: grantee.id,
+          ...(grantedBy ? { grantedBy } : {})
+        });
+      });
+
+      console.log(`Granted tool access on connection ${grant.connectionId} to ${grant.granteeId}`);
+    });
+
+  integration
+    .command("grants")
+    .requiredOption("--connection <connectionId>", "Connection ID")
+    .description("List tool grants for a connection")
+    .action(async (options: { connection: string }) => {
+      const grants = await withContext((ctx) => ctx.integrations.listToolGrants(options.connection));
+
+      if (grants.length === 0) {
+        console.log("No grants found.");
+        return;
+      }
+
+      for (const grant of grants) {
+        console.log(`${grant.toolId}  owner=${grant.ownerId}  grantee=${grant.granteeId}`);
+      }
     });
 
   const trace = program.command("trace").description("Inspect request traces");
