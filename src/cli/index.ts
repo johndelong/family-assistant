@@ -26,6 +26,19 @@ function parseChannel(value: string): ChannelType {
   throw new InvalidArgumentError(`Channel must be one of: ${validChannels.join(", ")}`);
 }
 
+function parseBooleanFlag(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "yes", "on", "1"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "no", "off", "0"].includes(normalized)) {
+    return false;
+  }
+
+  throw new InvalidArgumentError("Expected a boolean value like true/false, yes/no, on/off, or 1/0");
+}
+
 function parseJsonObject(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -127,6 +140,7 @@ function buildProgram(): Command {
       console.log(`- ENCRYPTION_MASTER_KEY configured: ${config.encryptionMasterKey ? "yes" : "no"}`);
       console.log(`- OPENAI_API_KEY configured: ${config.openAiApiKey ? "yes" : "no"}`);
       console.log(`- OPENAI_MODEL: ${config.openAiModel}`);
+      console.log(`- BRAVE_API_KEY configured: ${config.braveApiKey ? "yes" : "no"}`);
       console.log(`- ADMIN_API_TOKEN configured: ${config.adminApiToken ? "yes" : "no"}`);
       console.log(`- TELEGRAM_BOT_TOKEN configured: ${config.telegramBotToken ? "yes" : "no"}`);
       console.log(`- TELEGRAM_LONG_POLL_TIMEOUT_SEC: ${config.telegramLongPollTimeoutSec}`);
@@ -329,12 +343,35 @@ function buildProgram(): Command {
     });
 
   profile
+    .command("assistant-identity-show")
+    .description("Show the current assistant identity")
+    .action(async () => {
+      const record = await withContext((ctx) => ctx.profiles.getAssistantIdentity());
+      console.log(JSON.stringify(record, null, 2));
+    });
+
+  profile
     .command("assistant-set")
     .argument("<instructions>", "Assistant profile instructions")
     .description("Set the global assistant profile")
     .action(async (instructions: string) => {
       const record = await withContext((ctx) => ctx.profiles.setAssistantProfile(instructions.trim()));
       console.log(`Updated assistant profile at ${record.updatedAt.toISOString()}`);
+    });
+
+  profile
+    .command("assistant-identity-set")
+    .requiredOption("--name <name>", "Assistant name")
+    .requiredOption("--role <roleDescription>", "Assistant role description")
+    .option("--signature <signatureName>", "Optional signature name")
+    .description("Set the assistant identity")
+    .action(async (options: { name: string; role: string; signature?: string }) => {
+      const record = await withContext((ctx) => ctx.profiles.setAssistantIdentity({
+        name: options.name,
+        roleDescription: options.role,
+        ...(options.signature ? { signatureName: options.signature } : {})
+      }));
+      console.log(`Updated assistant identity at ${record.updatedAt.toISOString()}`);
     });
 
   profile
@@ -408,6 +445,43 @@ function buildProgram(): Command {
       });
 
       console.log(`Updated person profile for ${record.personId} at ${record.updatedAt.toISOString()}`);
+    });
+
+  const preference = program.command("preference").description("Manage per-person runtime preferences");
+
+  preference
+    .command("show")
+    .requiredOption("--person <personRef>", "Person ID or exact name")
+    .description("Show runtime preferences for a person")
+    .action(async (options: { person: string }) => {
+      const record = await withContext(async (ctx) => {
+        const personRecord = await findPersonByRef(ctx, options.person);
+        if (!personRecord) {
+          throw new Error(`Person not found: ${options.person}`);
+        }
+
+        return ctx.runtimePreferences.getPersonPreferences(personRecord.id);
+      });
+
+      console.log(`showProgress=${record.showProgress} updatedAt=${record.updatedAt.toISOString()}`);
+    });
+
+  preference
+    .command("set-progress")
+    .requiredOption("--person <personRef>", "Person ID or exact name")
+    .requiredOption("--enabled <boolean>", "Whether progress updates should be shown", parseBooleanFlag)
+    .description("Enable or disable visible progress updates for a person")
+    .action(async (options: { person: string; enabled: boolean }) => {
+      const record = await withContext(async (ctx) => {
+        const personRecord = await findPersonByRef(ctx, options.person);
+        if (!personRecord) {
+          throw new Error(`Person not found: ${options.person}`);
+        }
+
+        return ctx.runtimePreferences.setShowProgress(personRecord.id, options.enabled);
+      });
+
+      console.log(`Updated showProgress=${record.showProgress} for ${record.personId} at ${record.updatedAt.toISOString()}`);
     });
 
   const integration = program.command("integration").description("Manage integration connections, exposed tools, and grants");

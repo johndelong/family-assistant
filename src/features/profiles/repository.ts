@@ -1,10 +1,19 @@
 import { eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { assistantProfiles, householdProfiles, personProfiles } from "../../db/schema.js";
+import { assistantIdentity, assistantProfiles, householdProfiles, personProfiles } from "../../db/schema.js";
 
 export interface AssistantProfileRecord {
   key: string;
   instructions: string;
+  updatedAt: Date;
+}
+
+export interface AssistantIdentityRecord {
+  key: string;
+  name: string;
+  roleDescription: string;
+  introductionPolicy: "first_message_or_when_asked";
+  signatureName?: string;
   updatedAt: Date;
 }
 
@@ -29,6 +38,15 @@ export class ProfileRepository {
     "When giving reminders or guidance, sound supportive rather than bossy.",
     "For children, keep language age-appropriate, encouraging, and safe."
   ].join(" ");
+
+  static readonly DEFAULT_ASSISTANT_IDENTITY: AssistantIdentityRecord = {
+    key: "default",
+    name: "Rhys",
+    roleDescription: "A warm, practical household assistant for a real family.",
+    introductionPolicy: "first_message_or_when_asked",
+    signatureName: "Rhys",
+    updatedAt: new Date(0)
+  };
 
   constructor(private readonly db: NodePgDatabase) {}
 
@@ -60,6 +78,66 @@ export class ProfileRepository {
         target: assistantProfiles.key,
         set: {
           instructions: record.instructions,
+          updatedAt: record.updatedAt
+        }
+      });
+
+    return record;
+  }
+
+  async getAssistantIdentity(): Promise<AssistantIdentityRecord> {
+    const [record] = await this.db
+      .select()
+      .from(assistantIdentity)
+      .where(eq(assistantIdentity.key, "default"))
+      .limit(1);
+
+    if (record) {
+      return {
+        key: record.key,
+        name: record.name,
+        roleDescription: record.roleDescription,
+        introductionPolicy: record.introductionPolicy as "first_message_or_when_asked",
+        ...(record.signatureName ? { signatureName: record.signatureName } : {}),
+        updatedAt: record.updatedAt
+      };
+    }
+
+    return ProfileRepository.DEFAULT_ASSISTANT_IDENTITY;
+  }
+
+  async setAssistantIdentity(input: {
+    name: string;
+    roleDescription: string;
+    introductionPolicy?: "first_message_or_when_asked";
+    signatureName?: string;
+  }): Promise<AssistantIdentityRecord> {
+    const record: AssistantIdentityRecord = {
+      key: "default",
+      name: input.name.trim(),
+      roleDescription: input.roleDescription.trim(),
+      introductionPolicy: input.introductionPolicy ?? "first_message_or_when_asked",
+      ...(input.signatureName?.trim() ? { signatureName: input.signatureName.trim() } : {}),
+      updatedAt: new Date()
+    };
+
+    await this.db
+      .insert(assistantIdentity)
+      .values({
+        key: record.key,
+        name: record.name,
+        roleDescription: record.roleDescription,
+        introductionPolicy: record.introductionPolicy,
+        signatureName: record.signatureName ?? null,
+        updatedAt: record.updatedAt
+      })
+      .onConflictDoUpdate({
+        target: assistantIdentity.key,
+        set: {
+          name: record.name,
+          roleDescription: record.roleDescription,
+          introductionPolicy: record.introductionPolicy,
+          signatureName: record.signatureName ?? null,
           updatedAt: record.updatedAt
         }
       });

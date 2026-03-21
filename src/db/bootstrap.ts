@@ -140,6 +140,17 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
   `);
 
   await db.execute(sql`
+    create table if not exists assistant_identity (
+      key varchar(64) primary key,
+      name text not null,
+      role_description text not null,
+      introduction_policy varchar(64) not null,
+      signature_name text,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
     create table if not exists household_profiles (
       household_id uuid primary key references households(id),
       instructions text not null,
@@ -153,6 +164,27 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
       instructions text not null,
       updated_at timestamptz not null
     )
+  `);
+
+  await db.execute(sql`
+    create table if not exists person_preferences (
+      person_id uuid primary key references persons(id),
+      show_progress varchar(10) not null,
+      updated_at timestamptz not null
+    )
+  `);
+
+  await db.execute(sql`
+    do $$
+    begin
+      if to_regclass('public.person_runtime_preferences') is not null then
+        insert into person_preferences (person_id, show_progress, updated_at)
+        select legacy.person_id, legacy.show_progress, legacy.updated_at
+        from person_runtime_preferences legacy
+        on conflict (person_id) do nothing;
+      end if;
+    end
+    $$;
   `);
 
   await db.execute(sql`

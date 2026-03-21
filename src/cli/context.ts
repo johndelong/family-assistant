@@ -20,16 +20,25 @@ import { LlmSessionSummarizer } from "../features/sessions/llm-session-summarize
 import { SessionService } from "../features/sessions/service.js";
 import { IdentityResolutionService } from "../features/identity/service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
+import { PersonPreferenceRepository } from "../features/preferences/repository.js";
 import { TraceWriter } from "../features/tracing/writer.js";
+import { createAccountStatusTool } from "../features/tools/account-status-tool.js";
 import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
 import { createMemoryStoreTool } from "../features/tools/memory-store-tool.js";
 import {
   createAssistantProfileSetTool,
+  createAssistantIdentitySetTool,
   createHouseholdProfileSetTool,
   createPersonProfileSetTool
 } from "../features/tools/profile-tools.js";
+import {
+  createRuntimePreferenceStatusTool,
+  createSetProgressVisibilityTool
+} from "../features/tools/runtime-preference-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 import { timeNowTool } from "../features/tools/time-now-tool.js";
+import { createToolCatalogTool } from "../features/tools/tool-catalog-tool.js";
+import { createWebSearchTool } from "../features/tools/web-search-tool.js";
 import type { AppConfig } from "../shared/config.js";
 
 export interface CliContext {
@@ -41,6 +50,7 @@ export interface CliContext {
   integrations: IntegrationRepository;
   mcpRuntime: McpRuntimeManager;
   profiles: ProfileRepository;
+  runtimePreferences: PersonPreferenceRepository;
   requestIntake: RequestIntakeService;
 }
 
@@ -57,16 +67,25 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const memory = new MemoryRepository(db);
   const memoryRetrieval = new MemoryRetrievalService(memory);
   const profiles = new ProfileRepository(db);
+  const runtimePreferences = new PersonPreferenceRepository(db);
   const integrations = new IntegrationRepository(db);
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   toolRegistry.register(systemHealthTool);
   toolRegistry.register(timeNowTool);
+  if (config.braveApiKey) {
+    toolRegistry.register(createWebSearchTool(config.braveApiKey));
+  }
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
+  toolRegistry.register(createToolCatalogTool(toolRegistry));
+  toolRegistry.register(createAccountStatusTool(integrations));
+  toolRegistry.register(createRuntimePreferenceStatusTool(runtimePreferences));
+  toolRegistry.register(createSetProgressVisibilityTool(runtimePreferences));
   toolRegistry.register(createPersonProfileSetTool(profiles));
   toolRegistry.register(createHouseholdProfileSetTool(profiles));
   toolRegistry.register(createAssistantProfileSetTool(profiles));
+  toolRegistry.register(createAssistantIdentitySetTool(profiles));
   await registerDynamicMcpTools({
     integrations,
     runtimeManager: mcpRuntime,
@@ -89,7 +108,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   );
   const orchestration = new OrchestrationService(toolRegistry, llmService, memoryRetrieval, promptProfiles, sessionService);
   const traceWriter = new TraceWriter(config.dataDir);
-  const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter);
+  const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, runtimePreferences);
 
   return {
     db,
@@ -99,6 +118,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
     integrations,
     mcpRuntime,
     profiles,
+    runtimePreferences,
     requestIntake,
     async close() {
       await mcpRuntime.stopAll();

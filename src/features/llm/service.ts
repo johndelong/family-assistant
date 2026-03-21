@@ -1,10 +1,12 @@
 import type { Person } from "../../core/domain.js";
 import type { InboundMessage } from "../../core/channels.js";
-import type { LlmProvider, LlmToolTrace } from "./provider.js";
+import type { LlmProvider, LlmToolSelectionTrace, LlmToolTrace } from "./provider.js";
 import type { ToolRegistry } from "../../core/tools.js";
 import type { RetrievedMemory } from "../memory/retrieval-service.js";
 import type { PromptProfileContext } from "../profiles/prompt-profile-service.js";
 import type { SessionContext } from "../sessions/service.js";
+import { readPromptFragment } from "./prompt-fragments.js";
+import { selectRelevantTools } from "./tool-selection.js";
 
 export class LlmService {
   constructor(private readonly provider: LlmProvider) {}
@@ -52,9 +54,21 @@ export class LlmService {
     relevantMemories?: RetrievedMemory[] | undefined;
     profileContext?: PromptProfileContext | undefined;
     sessionContext?: SessionContext | undefined;
-  }): Promise<{ model: string; text: string; usedTools: string[]; toolTrace: LlmToolTrace[] }> {
-    const tools = input.toolRegistry
-      .listConversationTools()
+    onProgress?: ((message: string) => Promise<void>) | undefined;
+  }): Promise<{
+    model: string;
+    text: string;
+    usedTools: string[];
+    toolTrace: LlmToolTrace[];
+    toolSelectionTrace: LlmToolSelectionTrace[];
+  }> {
+    const selection = selectRelevantTools({
+      messageText: input.message.text,
+      person: input.person,
+      tools: input.toolRegistry.listConversationTools()
+    });
+
+    const tools = selection.selectedTools
       .filter((tool) => tool.inputJsonSchema)
       .map((tool) => ({
         internalName: tool.id,
@@ -97,6 +111,8 @@ export class LlmService {
         if (!tool) {
           throw new Error(`Unknown tool call from model: ${toolCall.name}`);
         }
+
+        await input.onProgress?.(describeToolWork(tool.internalName, tool.description));
 
         try {
           const result = await input.toolRegistry.execute(tool.internalName, parsedArgs, {
@@ -155,9 +171,19 @@ export class LlmService {
           : "I processed that, but I do not have a response ready yet."
       ),
       usedTools,
-      toolTrace
+      toolTrace,
+      toolSelectionTrace: selection.trace
     };
   }
+}
+
+function describeToolWork(toolId: string, description: string): string {
+  const summary = description.split(/(?<=[.!?])\s+/)[0]?.trim();
+  if (summary && summary.length <= 140) {
+    return summary;
+  }
+
+  return `Using ${toolId}...`;
 }
 
 function toOpenAiToolName(toolId: string): string {
@@ -327,44 +353,14 @@ function buildBaseSystemPrompt(
   enableTools: boolean
 ): string {
   const sections = [
-    "You are a helpful household assistant.",
-    "You already know the user's identity from application code.",
+    readPromptFragment("base"),
     buildStableTimeContext(),
     profileContext ? buildProfileContext(profileContext) : undefined,
+    readPromptFragment("identity"),
+    readPromptFragment("profiles"),
     enableTools
-      ? [
-          "Use tools when they help answer accurately.",
-          "Use time.now whenever you need the exact current date, current time, or exact interpretation of words like today, tomorrow, or this week.",
-          "When a task depends on external data, connected accounts, recipient resolution, provider capabilities, or other information outside the conversation, take a best-effort multi-step approach with the available tools before asking the user to repeat information you may be able to resolve yourself.",
-          "Do not claim that you checked a system, account, inbox, calendar, contacts source, or external service unless you actually used tools and got results back.",
-          "If you are unsure what tools or connected accounts are available, inspect them first with tool.catalog or account.status.",
-          "When tool results suggest a next step, continue reasoning from those results instead of stopping early.",
-          "Use memory.store to save durable context only when the user is clearly asking you to remember something for later.",
-          "Choose scope='private' for person-specific preferences or facts, and scope='shared' for household-wide routines, schedules, or family context.",
-          "The profile sections in this prompt reflect the current persisted assistant style and user preferences.",
-          "If the user asks what preferences, personality, or style are currently set, answer directly from those profile sections.",
-          "If a profile section is marked as not set, say that clearly instead of inventing one.",
-          "Assistant Style can be described to any household member.",
-          "Household Preferences can be described as shared family context.",
-          "Person Preferences apply only to the currently resolved person in this conversation.",
-          "If asked about another person's private preferences, say you cannot report those from this conversation context.",
-          "When a user wants help setting preferences, run a short interview over multiple turns rather than asking everything at once.",
-          "After the user clearly states or confirms stable preferences, persist them with the appropriate profile tool.",
-          "Use profile.set_person_preferences for one person's preferences, profile.set_household_preferences for family-wide norms, and profile.set_assistant_style only when an admin explicitly asks to change how the assistant behaves overall.",
-          "Do not update a household or assistant-wide profile unless the user is explicit and the scope is clear.",
-          "Only use the provided tools."
-        ].join(" ")
-      : [
-          "The profile sections in this prompt reflect the current persisted assistant style and user preferences.",
-          "If the user asks what preferences, personality, or style are currently set, answer directly from those profile sections.",
-          "If a profile section is marked as not set, say that clearly instead of inventing one.",
-          "Assistant Style can be described to any household member.",
-          "Household Preferences can be described as shared family context.",
-          "Person Preferences apply only to the currently resolved person in this conversation.",
-          "If asked about another person's private preferences, say you cannot report those from this conversation context.",
-          "Do not claim to have used tools unless tool results were provided."
-        ].join(" "),
-    "Be concise and practical."
+      ? readPromptFragment("tools")
+      : "Do not claim to have used tools unless tool results were provided."
   ];
 
   return sections.filter(Boolean).join("\n\n");
@@ -373,6 +369,7 @@ function buildBaseSystemPrompt(
 function buildProfileContext(profileContext: PromptProfileContext): string {
   return [
     "Current persisted profile context:",
+    `Assistant Identity:\nName: ${profileContext.assistantIdentity.name}\nRole: ${profileContext.assistantIdentity.roleDescription}\nIntroduction policy: Do not announce your name in every reply and do not sign routine chat responses. Use your name naturally only when first introducing yourself, when asked who you are, or when signing outbound messages such as email.${profileContext.assistantIdentity.signatureName ? `\nSignature name: ${profileContext.assistantIdentity.signatureName}` : ""}`,
     `Assistant Style:\n${profileContext.assistantStyle}`,
     profileContext.householdPreferences
       ? `Household Preferences:\n${profileContext.householdPreferences}`

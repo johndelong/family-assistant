@@ -13,6 +13,7 @@ const appConfigSchema = z.object({
   ENCRYPTION_MASTER_KEY: z.string().min(32).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().default("gpt-5-mini"),
+  BRAVE_API_KEY: z.string().min(1).optional(),
   ADMIN_API_TOKEN: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_LONG_POLL_TIMEOUT_SEC: z.coerce.number().int().positive().max(60).default(30)
@@ -28,6 +29,7 @@ export interface AppConfig {
   encryptionMasterKey?: string;
   openAiApiKey?: string;
   openAiModel: string;
+  braveApiKey?: string;
   adminApiToken?: string;
   telegramBotToken?: string;
   telegramLongPollTimeoutSec: number;
@@ -47,6 +49,7 @@ export function loadAppConfig(source: NodeJS.ProcessEnv = process.env): AppConfi
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
     ...(parsed.ENCRYPTION_MASTER_KEY ? { encryptionMasterKey: parsed.ENCRYPTION_MASTER_KEY } : {}),
     ...(parsed.OPENAI_API_KEY ? { openAiApiKey: parsed.OPENAI_API_KEY } : {}),
+    ...(parsed.BRAVE_API_KEY ? { braveApiKey: parsed.BRAVE_API_KEY } : {}),
     ...(parsed.ADMIN_API_TOKEN ? { adminApiToken: parsed.ADMIN_API_TOKEN } : {}),
     ...(parsed.TELEGRAM_BOT_TOKEN ? { telegramBotToken: parsed.TELEGRAM_BOT_TOKEN } : {})
   };

@@ -15,6 +15,7 @@ import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
 import { PersonRepository } from "../features/persons/repository.js";
+import { PersonPreferenceRepository } from "../features/preferences/repository.js";
 import { PromptProfileService } from "../features/profiles/prompt-profile-service.js";
 import { ProfileRepository } from "../features/profiles/repository.js";
 import { RequestIntakeService } from "../features/requests/service.js";
@@ -22,15 +23,23 @@ import { SessionRepository } from "../features/sessions/repository.js";
 import { LlmSessionSummarizer } from "../features/sessions/llm-session-summarizer.js";
 import { SessionService } from "../features/sessions/service.js";
 import { TraceWriter } from "../features/tracing/writer.js";
+import { createAccountStatusTool } from "../features/tools/account-status-tool.js";
 import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
 import { createMemoryStoreTool } from "../features/tools/memory-store-tool.js";
 import {
   createAssistantProfileSetTool,
+  createAssistantIdentitySetTool,
   createHouseholdProfileSetTool,
   createPersonProfileSetTool
 } from "../features/tools/profile-tools.js";
+import {
+  createRuntimePreferenceStatusTool,
+  createSetProgressVisibilityTool
+} from "../features/tools/runtime-preference-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 import { timeNowTool } from "../features/tools/time-now-tool.js";
+import { createToolCatalogTool } from "../features/tools/tool-catalog-tool.js";
+import { createWebSearchTool } from "../features/tools/web-search-tool.js";
 
 export interface ServerContext {
   config: AppConfig;
@@ -52,6 +61,9 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const mcpRuntime = new McpRuntimeManager();
   toolRegistry.register(systemHealthTool);
   toolRegistry.register(timeNowTool);
+  if (config.braveApiKey) {
+    toolRegistry.register(createWebSearchTool(config.braveApiKey));
+  }
 
   if (!config.databaseUrl) {
     return {
@@ -76,14 +88,20 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const memory = new MemoryRepository(db);
   const memoryRetrieval = new MemoryRetrievalService(memory);
   const profiles = new ProfileRepository(db);
+  const personPreferences = new PersonPreferenceRepository(db);
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   const identityResolution = new IdentityResolutionService(identities, persons);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
+  toolRegistry.register(createToolCatalogTool(toolRegistry));
+  toolRegistry.register(createAccountStatusTool(integrations));
+  toolRegistry.register(createRuntimePreferenceStatusTool(personPreferences));
+  toolRegistry.register(createSetProgressVisibilityTool(personPreferences));
   toolRegistry.register(createPersonProfileSetTool(profiles));
   toolRegistry.register(createHouseholdProfileSetTool(profiles));
   toolRegistry.register(createAssistantProfileSetTool(profiles));
+  toolRegistry.register(createAssistantIdentitySetTool(profiles));
   await registerDynamicMcpTools({
     integrations,
     runtimeManager: mcpRuntime,
@@ -102,7 +120,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   );
   const orchestration = new OrchestrationService(toolRegistry, llmService, memoryRetrieval, promptProfiles, sessionService);
   const traceWriter = new TraceWriter(config.dataDir);
-  const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter);
+  const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, personPreferences);
 
   return {
     config,

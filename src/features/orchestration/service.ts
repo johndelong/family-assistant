@@ -18,6 +18,11 @@ export interface OrchestratedResponse {
       output?: string;
       error?: string;
     }>;
+    toolSelectionTrace?: Array<{
+      toolId: string;
+      score: number;
+      selected: boolean;
+    }>;
     relevantMemories?: RetrievedMemory[];
     profileContext?: PromptProfileContext;
     sessionContext?: SessionContext;
@@ -37,6 +42,7 @@ export class OrchestrationService {
     requestId: string;
     person: Person;
     message: InboundMessage;
+    onProgress?: ((message: string) => Promise<void>) | undefined;
   }): Promise<OrchestratedResponse> {
     const rawText = input.message.text.trim();
     const normalizedText = rawText.toLowerCase();
@@ -112,6 +118,7 @@ export class OrchestrationService {
     }
 
     if (this.llmService) {
+      await input.onProgress?.("Thinking through that...");
       const profileContext = this.promptProfileService
         ? await this.promptProfileService.buildContextForPerson(input.person)
         : undefined;
@@ -136,7 +143,8 @@ export class OrchestrationService {
         toolRegistry: this.toolRegistry,
         relevantMemories,
         profileContext,
-        sessionContext
+        sessionContext,
+        onProgress: input.onProgress
       });
 
       if (sessionContext) {
@@ -154,6 +162,7 @@ export class OrchestrationService {
         trace: {
           usedTools: response.usedTools,
           toolTrace: response.toolTrace,
+          toolSelectionTrace: response.toolSelectionTrace,
           relevantMemories,
           ...(sessionContext ? { sessionContext } : {}),
           ...(profileContext ? { profileContext } : {})

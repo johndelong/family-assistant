@@ -3,7 +3,7 @@ import type { Tool } from "../../core/tools.js";
 import { ProfileRepository } from "../profiles/repository.js";
 
 interface ProfileUpdateResult {
-  scope: "assistant" | "household" | "person";
+  scope: "assistant" | "assistant_identity" | "household" | "person";
   updatedAt: string;
 }
 
@@ -101,6 +101,69 @@ export function createAssistantProfileSetTool(profiles: ProfileRepository): Tool
       const record = await profiles.setAssistantProfile(input.instructions.trim());
       return {
         scope: "assistant",
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+  };
+}
+
+const assistantIdentityUpdateSchema = z.object({
+  name: z.string().min(1),
+  roleDescription: z.string().min(1),
+  signatureName: z.string().min(1).optional()
+});
+
+type AssistantIdentityUpdateInput = z.infer<typeof assistantIdentityUpdateSchema>;
+
+const assistantIdentityUpdateJsonSchema = {
+  type: "object",
+  properties: {
+    name: {
+      type: "string",
+      description: "The assistant's conversational name"
+    },
+    roleDescription: {
+      type: "string",
+      description: "A concise role description that explains what the assistant is"
+    },
+    signatureName: {
+      type: "string",
+      description: "Optional signature name to use in outbound messages"
+    }
+  },
+  required: ["name", "roleDescription"],
+  additionalProperties: false
+} satisfies Record<string, unknown>;
+
+export function createAssistantIdentitySetTool(
+  profiles: ProfileRepository
+): Tool<AssistantIdentityUpdateInput, ProfileUpdateResult> {
+  return {
+    id: "profile.set_assistant_identity",
+    description: "Update the assistant's name and identity framing when an admin explicitly requests a change",
+    inputSchema: assistantIdentityUpdateSchema,
+    inputJsonSchema: assistantIdentityUpdateJsonSchema,
+    requiredCapabilities: [],
+    exposure: "conversation",
+    approvalPolicy: "admin_only",
+    targetScope: "system",
+    async execute(input, context): Promise<ProfileUpdateResult> {
+      if (!context.person) {
+        throw new Error("A resolved person is required to update assistant identity");
+      }
+
+      if (context.person.role !== "admin") {
+        throw new Error("Only an admin can update assistant identity");
+      }
+
+      const record = await profiles.setAssistantIdentity({
+        name: input.name,
+        roleDescription: input.roleDescription,
+        ...(input.signatureName ? { signatureName: input.signatureName } : {})
+      });
+
+      return {
+        scope: "assistant_identity",
         updatedAt: record.updatedAt.toISOString()
       };
     }

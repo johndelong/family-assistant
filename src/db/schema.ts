@@ -95,6 +95,15 @@ export const assistantProfiles = pgTable("assistant_profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
 });
 
+export const assistantIdentity = pgTable("assistant_identity", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  name: text("name").notNull(),
+  roleDescription: text("role_description").notNull(),
+  introductionPolicy: varchar("introduction_policy", { length: 64 }).notNull(),
+  signatureName: text("signature_name"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
 export const householdProfiles = pgTable("household_profiles", {
   householdId: uuid("household_id").primaryKey().references(() => households.id),
   instructions: text("instructions").notNull(),
@@ -104,6 +113,12 @@ export const householdProfiles = pgTable("household_profiles", {
 export const personProfiles = pgTable("person_profiles", {
   personId: uuid("person_id").primaryKey().references(() => persons.id),
   instructions: text("instructions").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const personPreferences = pgTable("person_preferences", {
+  personId: uuid("person_id").primaryKey().references(() => persons.id),
+  showProgress: varchar("show_progress", { length: 10 }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
 });
 

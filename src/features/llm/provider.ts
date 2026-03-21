@@ -40,6 +40,12 @@ export interface LlmToolTrace {
   error?: string;
 }
 
+export interface LlmToolSelectionTrace {
+  toolId: string;
+  score: number;
+  selected: boolean;
+}
+
 export interface LlmProvider {
   readonly name: string;
   generate(input: LlmGenerateParams): Promise<LlmGenerateResult>;

@@ -2,6 +2,7 @@ import type { InboundMessage } from "../../core/channels.js";
 import type { Person } from "../../core/domain.js";
 import { IdentityResolutionService } from "../identity/service.js";
 import { OrchestrationService } from "../orchestration/service.js";
+import { PersonPreferenceRepository } from "../preferences/repository.js";
 import { TraceWriter } from "../tracing/writer.js";
 
 export type AcceptedRequest =
@@ -25,10 +26,15 @@ export class RequestIntakeService {
   constructor(
     private readonly identityResolution: IdentityResolutionService,
     private readonly orchestration: OrchestrationService,
-    private readonly traceWriter: TraceWriter
+    private readonly traceWriter: TraceWriter,
+    private readonly runtimePreferences?: PersonPreferenceRepository
   ) {}
 
-  async acceptInboundMessage(input: { requestId: string; message: InboundMessage }): Promise<AcceptedRequest> {
+  async acceptInboundMessage(input: {
+    requestId: string;
+    message: InboundMessage;
+    onProgress?: ((message: string) => Promise<void>) | undefined;
+  }): Promise<AcceptedRequest> {
     await this.traceWriter.write({
       timestamp: new Date().toISOString(),
       requestId: input.requestId,
@@ -43,6 +49,11 @@ export class RequestIntakeService {
     const resolution = await this.identityResolution.resolveInboundMessage(input.message);
 
     if (resolution.status === "resolved") {
+      const runtimePreferences = this.runtimePreferences
+        ? await this.runtimePreferences.getPersonPreferences(resolution.person.id)
+        : undefined;
+      const progressHandler = runtimePreferences?.showProgress ? input.onProgress : undefined;
+
       await this.traceWriter.write({
         timestamp: new Date().toISOString(),
         requestId: input.requestId,
@@ -58,7 +69,8 @@ export class RequestIntakeService {
       const response = await this.orchestration.processResolvedMessage({
         requestId: input.requestId,
         person: resolution.person,
-        message: input.message
+        message: input.message,
+        onProgress: progressHandler
       });
 
       await this.traceWriter.write({
@@ -68,6 +80,7 @@ export class RequestIntakeService {
         payload: response.model ? {
           model: response.model,
           usedTools: response.trace?.usedTools ?? [],
+          toolSelection: summarizeToolSelectionTrace(response.trace?.toolSelectionTrace ?? []),
           toolTrace: summarizeToolTrace(response.trace?.toolTrace ?? []),
           relevantMemories: summarizeRelevantMemories(response.trace?.relevantMemories ?? []),
           profileContext: summarizeProfileContext(response.trace?.profileContext),
@@ -225,4 +238,22 @@ function summarizeToolTrace(toolTrace: Array<{
     ...(entry.output ? { outputPreview: summarizeText(entry.output) } : {}),
     ...(entry.error ? { error: summarizeText(entry.error) } : {})
   }));
+}
+
+function summarizeToolSelectionTrace(toolSelectionTrace: Array<{
+  toolId: string;
+  score: number;
+  selected: boolean;
+}>): Array<{
+  toolId: string;
+  score: number;
+  selected: boolean;
+}> {
+  return toolSelectionTrace
+    .slice(0, 20)
+    .map((entry) => ({
+      toolId: entry.toolId,
+      score: entry.score,
+      selected: entry.selected
+    }));
 }

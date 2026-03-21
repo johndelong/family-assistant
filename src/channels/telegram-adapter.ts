@@ -94,7 +94,10 @@ export class TelegramAdapter implements ChannelAdapter {
       const requestId = randomUUID();
       const outcome = await this.#requestIntake.acceptInboundMessage({
         requestId,
-        message: inbound
+        message: inbound,
+        onProgress: async (message) => {
+          await ctx.reply(formatProgressMessage(message));
+        }
       });
 
       const replyText = formatAcceptedRequestForUser(outcome).trim() || "I processed that, but I do not have a message to send yet.";
@@ -132,4 +135,13 @@ export class TelegramAdapter implements ChannelAdapter {
       clearInterval(timer);
     };
   }
+}
+
+function formatProgressMessage(message: string): string {
+  const normalized = message.trim();
+  if (normalized.length === 0) {
+    return "⏳ Working...";
+  }
+
+  return `⏳ Working: ${normalized}`;
 }
