@@ -4,7 +4,6 @@ import { Command, InvalidArgumentError } from "commander";
 import { TraceRepository } from "../features/tracing/repository.js";
 import { formatAcceptedRequestForUser } from "../features/requests/formatter.js";
 import type { ChannelType, PersonRole } from "../core/domain.js";
-import { McpStdioClient } from "../features/integrations/mcp-stdio-client.js";
 import { createCliContext } from "./context.js";
 import { loadAppConfig } from "../shared/config.js";
 
@@ -128,6 +127,7 @@ function buildProgram(): Command {
       console.log(`- ENCRYPTION_MASTER_KEY configured: ${config.encryptionMasterKey ? "yes" : "no"}`);
       console.log(`- OPENAI_API_KEY configured: ${config.openAiApiKey ? "yes" : "no"}`);
       console.log(`- OPENAI_MODEL: ${config.openAiModel}`);
+      console.log(`- ADMIN_API_TOKEN configured: ${config.adminApiToken ? "yes" : "no"}`);
       console.log(`- TELEGRAM_BOT_TOKEN configured: ${config.telegramBotToken ? "yes" : "no"}`);
       console.log(`- TELEGRAM_LONG_POLL_TIMEOUT_SEC: ${config.telegramLongPollTimeoutSec}`);
 
@@ -477,82 +477,6 @@ function buildProgram(): Command {
   const integrationTool = integration.command("tool").description("Manage dynamically exposed integration tools");
 
   integrationTool
-    .command("discover")
-    .requiredOption("--connection <connectionId>", "Connection ID")
-    .description("Discover tools from an MCP server and import them into the registry")
-    .action(async (options: { connection: string }) => {
-      const imported = await withContext(async (ctx) => {
-        const connection = await ctx.integrations.findConnectionById(options.connection);
-        if (!connection) {
-          throw new Error(`Connection not found: ${options.connection}`);
-        }
-
-        const metadata = connection.metadata ?? {};
-        const command = metadata.command;
-        const args = metadata.args;
-        const cwd = metadata.cwd;
-        const env = metadata.env;
-        if (typeof command !== "string" || command.trim().length === 0) {
-          throw new Error("Connection is missing metadata.command");
-        }
-
-        if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
-          throw new Error("Connection metadata.args must be a string array when present");
-        }
-
-        if (cwd !== undefined && typeof cwd !== "string") {
-          throw new Error("Connection metadata.cwd must be a string when present");
-        }
-
-        if (
-          env !== undefined &&
-          (
-            typeof env !== "object" ||
-            env === null ||
-            Array.isArray(env) ||
-            Object.values(env).some((value) => typeof value !== "string")
-          )
-        ) {
-          throw new Error("Connection metadata.env must be a string object when present");
-        }
-
-        const client = new McpStdioClient();
-        const tools = await client.listTools({
-          command,
-          ...(Array.isArray(args) ? { args: args as string[] } : {}),
-          ...(typeof cwd === "string" ? { cwd } : {}),
-          ...(env ? { env: env as Record<string, string> } : {})
-        });
-
-        const importedTools = [];
-        for (const tool of tools) {
-          importedTools.push(await ctx.integrations.upsertExposedTool({
-            connectionId: connection.id,
-            toolName: tool.name,
-            description: tool.description ?? `Imported MCP tool ${tool.name}`,
-            inputJsonSchema: tool.inputSchema ?? {
-              type: "object",
-              properties: {},
-              required: [],
-              additionalProperties: true
-            }
-          }));
-        }
-
-        return importedTools;
-      });
-
-      if (imported.length === 0) {
-        console.log("No MCP tools discovered.");
-        return;
-      }
-
-      for (const tool of imported) {
-        console.log(`Imported ${tool.toolName} -> ${tool.id}`);
-      }
-    });
-
-  integrationTool
     .command("register")
     .requiredOption("--connection <connectionId>", "Connection ID")
     .requiredOption("--name <toolName>", "External MCP tool name")
@@ -600,63 +524,6 @@ function buildProgram(): Command {
       }
     });
 
-  integrationTool
-    .command("call")
-    .requiredOption("--connection <connectionId>", "Connection ID")
-    .requiredOption("--name <toolName>", "Tool name on that connection")
-    .option("--input <json>", "JSON object input for the tool", "{}")
-    .description("Directly invoke a discovered MCP tool for testing or auth setup")
-    .action(async (options: { connection: string; name: string; input: string }) => {
-      const inputValue = parseJsonObject(options.input);
-      const result = await withContext(async (ctx) => {
-        const connection = await ctx.integrations.findConnectionById(options.connection);
-        if (!connection) {
-          throw new Error(`Connection not found: ${options.connection}`);
-        }
-
-        const metadata = connection.metadata ?? {};
-        const command = metadata.command;
-        const args = metadata.args;
-        const cwd = metadata.cwd;
-        const env = metadata.env;
-        if (typeof command !== "string" || command.trim().length === 0) {
-          throw new Error("Connection is missing metadata.command");
-        }
-
-        if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
-          throw new Error("Connection metadata.args must be a string array when present");
-        }
-
-        if (cwd !== undefined && typeof cwd !== "string") {
-          throw new Error("Connection metadata.cwd must be a string when present");
-        }
-
-        if (
-          env !== undefined &&
-          (
-            typeof env !== "object" ||
-            env === null ||
-            Array.isArray(env) ||
-            Object.values(env).some((value) => typeof value !== "string")
-          )
-        ) {
-          throw new Error("Connection metadata.env must be a string object when present");
-        }
-
-        const client = new McpStdioClient();
-        return client.callTool({
-          command,
-          ...(Array.isArray(args) ? { args: args as string[] } : {}),
-          ...(typeof cwd === "string" ? { cwd } : {}),
-          ...(env ? { env: env as Record<string, string> } : {})
-        }, {
-          name: options.name,
-          arguments: inputValue
-        });
-      });
-
-      console.log(JSON.stringify(result, null, 2));
-    });
 
   integration
     .command("grant")

@@ -4,5 +4,6 @@ dist
 .env.local
 .DS_Store
 coverage
+.family-assistant
 */traces/*
 

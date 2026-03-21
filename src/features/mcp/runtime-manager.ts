@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import type { IntegrationConnection } from "../../core/domain.js";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -26,52 +27,77 @@ export interface McpToolDefinition {
   inputSchema?: Record<string, unknown>;
 }
 
-export interface McpStdioConnectionOptions {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
-  requestTimeoutMs?: number;
+export interface McpRuntimeManagerOptions {
+  defaultRequestTimeoutMs?: number;
 }
 
-export class McpStdioClient {
-  async listTools(options: McpStdioConnectionOptions): Promise<McpToolDefinition[]> {
-    const session = await McpStdioSession.start(options);
+export class McpRuntimeManager {
+  readonly #sessions = new Map<string, ManagedMcpSession>();
+  readonly #defaultRequestTimeoutMs: number;
 
-    try {
-      const result = await session.request("tools/list");
-      const tools = ((result as { tools?: unknown[] }).tools ?? []) as Array<Record<string, unknown>>;
-
-      return tools.map((tool) => ({
-        name: String(tool.name),
-        ...(tool.description ? { description: String(tool.description) } : {}),
-        ...(tool.inputSchema && typeof tool.inputSchema === "object"
-          ? { inputSchema: tool.inputSchema as Record<string, unknown> }
-          : {})
-      }));
-    } finally {
-      await session.stop();
-    }
+  constructor(options?: McpRuntimeManagerOptions) {
+    this.#defaultRequestTimeoutMs = options?.defaultRequestTimeoutMs ?? 120_000;
   }
 
-  async callTool(options: McpStdioConnectionOptions, input: {
+  async listTools(connection: IntegrationConnection): Promise<McpToolDefinition[]> {
+    const session = await this.ensureSession(connection);
+    const result = await session.request("tools/list");
+    const tools = ((result as { tools?: unknown[] }).tools ?? []) as Array<Record<string, unknown>>;
+
+    return tools.map((tool) => ({
+      name: String(tool.name),
+      ...(tool.description ? { description: String(tool.description) } : {}),
+      ...(tool.inputSchema && typeof tool.inputSchema === "object"
+        ? { inputSchema: tool.inputSchema as Record<string, unknown> }
+        : {})
+    }));
+  }
+
+  async callTool(connection: IntegrationConnection, input: {
     name: string;
     arguments: Record<string, unknown>;
   }): Promise<unknown> {
-    const session = await McpStdioSession.start(options);
+    const session = await this.ensureSession(connection);
+    return session.request("tools/call", {
+      name: input.name,
+      arguments: input.arguments
+    });
+  }
 
-    try {
-      return await session.request("tools/call", {
-        name: input.name,
-        arguments: input.arguments
-      });
-    } finally {
-      await session.stop();
+  async ensureSession(connection: IntegrationConnection): Promise<ManagedMcpSession> {
+    const existing = this.#sessions.get(connection.id);
+    if (existing && existing.isAlive()) {
+      return existing;
     }
+
+    if (existing) {
+      this.#sessions.delete(connection.id);
+      await existing.stop();
+    }
+
+    const session = await ManagedMcpSession.start(connection, this.#defaultRequestTimeoutMs);
+    this.#sessions.set(connection.id, session);
+    return session;
+  }
+
+  async stopSession(connectionId: string): Promise<void> {
+    const session = this.#sessions.get(connectionId);
+    if (!session) {
+      return;
+    }
+
+    this.#sessions.delete(connectionId);
+    await session.stop();
+  }
+
+  async stopAll(): Promise<void> {
+    const sessions = Array.from(this.#sessions.values());
+    this.#sessions.clear();
+    await Promise.all(sessions.map((session) => session.stop()));
   }
 }
 
-class McpStdioSession {
+class ManagedMcpSession {
   readonly #child: ReturnType<typeof spawn>;
   readonly #pending = new Map<number, {
     resolve(value: unknown): void;
@@ -81,10 +107,12 @@ class McpStdioSession {
   readonly #stderrChunks: string[] = [];
   readonly #requestTimeoutMs: number;
   #nextId = 1;
+  #alive = true;
 
   private constructor(child: ReturnType<typeof spawn>, requestTimeoutMs: number) {
     this.#child = child;
     this.#requestTimeoutMs = requestTimeoutMs;
+
     if (!this.#child.stdout || !this.#child.stdin || !this.#child.stderr) {
       throw new Error("MCP stdio process did not expose stdin/stdout/stderr");
     }
@@ -98,9 +126,11 @@ class McpStdioSession {
       this.#stderrChunks.push(chunk);
     });
     this.#child.on("error", (error) => {
+      this.#alive = false;
       this.#rejectAllPending(new Error(`Failed to start MCP process: ${error.message}`));
     });
     this.#child.on("close", (code, signal) => {
+      this.#alive = false;
       const stderr = this.#stderrSummary();
       this.#rejectAllPending(new Error(
         `MCP process exited before responding (code=${code ?? "null"}, signal=${signal ?? "null"})${stderr ? `: ${stderr}` : ""}`
@@ -108,14 +138,15 @@ class McpStdioSession {
     });
   }
 
-  static async start(options: McpStdioConnectionOptions): Promise<McpStdioSession> {
-    const child = spawn(options.command, options.args ?? [], {
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
+  static async start(connection: IntegrationConnection, requestTimeoutMs: number): Promise<ManagedMcpSession> {
+    const transport = parseMcpTransport(connection);
+    const child = spawn(transport.command, transport.args ?? [], {
+      ...(transport.cwd ? { cwd: transport.cwd } : {}),
+      ...(transport.env ? { env: { ...process.env, ...transport.env } } : {}),
       stdio: ["pipe", "pipe", "pipe"]
     });
 
-    const session = new McpStdioSession(child, options.requestTimeoutMs ?? 30_000);
+    const session = new ManagedMcpSession(child, requestTimeoutMs);
     await session.request("initialize", {
       protocolVersion: "2025-03-26",
       clientInfo: {
@@ -126,6 +157,10 @@ class McpStdioSession {
     });
     session.notify("notifications/initialized");
     return session;
+  }
+
+  isAlive(): boolean {
+    return this.#alive && !this.#child.killed;
   }
 
   async stop(): Promise<void> {
@@ -139,6 +174,10 @@ class McpStdioSession {
   }
 
   async request(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (!this.isAlive()) {
+      throw new Error("MCP session is not alive");
+    }
+
     const id = this.#nextId++;
     const payload: JsonRpcRequest = {
       jsonrpc: "2.0",
@@ -170,6 +209,10 @@ class McpStdioSession {
   }
 
   notify(method: string, params?: Record<string, unknown>): void {
+    if (!this.isAlive()) {
+      return;
+    }
+
     const payload = {
       jsonrpc: "2.0" as const,
       method,
@@ -238,4 +281,48 @@ class McpStdioSession {
 
     return stderr.length > 600 ? `${stderr.slice(0, 597)}...` : stderr;
   }
+}
+
+function parseMcpTransport(connection: IntegrationConnection): {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+} {
+  const metadata = connection.metadata ?? {};
+  const command = metadata.command;
+  const args = metadata.args;
+  const cwd = metadata.cwd;
+  const env = metadata.env;
+
+  if (typeof command !== "string" || command.trim().length === 0) {
+    throw new Error(`MCP connection ${connection.id} is missing metadata.command`);
+  }
+
+  if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
+    throw new Error(`MCP connection ${connection.id} has invalid metadata.args`);
+  }
+
+  if (cwd !== undefined && typeof cwd !== "string") {
+    throw new Error(`MCP connection ${connection.id} has invalid metadata.cwd`);
+  }
+
+  if (
+    env !== undefined &&
+    (
+      typeof env !== "object" ||
+      env === null ||
+      Array.isArray(env) ||
+      Object.values(env).some((value) => typeof value !== "string")
+    )
+  ) {
+    throw new Error(`MCP connection ${connection.id} has invalid metadata.env`);
+  }
+
+  return {
+    command,
+    ...(Array.isArray(args) ? { args: args as string[] } : {}),
+    ...(typeof cwd === "string" ? { cwd } : {}),
+    ...(env ? { env: env as Record<string, string> } : {})
+  };
 }

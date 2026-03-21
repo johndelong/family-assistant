@@ -33,6 +33,13 @@ export interface LlmToolResponse {
   responseId?: string;
 }
 
+export interface LlmToolTrace {
+  toolName: string;
+  arguments: string;
+  output?: string;
+  error?: string;
+}
+
 export interface LlmProvider {
   readonly name: string;
   generate(input: LlmGenerateParams): Promise<LlmGenerateResult>;

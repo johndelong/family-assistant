@@ -10,7 +10,7 @@ import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
 import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-tools.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
-import { McpStdioClient } from "../features/integrations/mcp-stdio-client.js";
+import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
 import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
@@ -30,14 +30,17 @@ import {
   createPersonProfileSetTool
 } from "../features/tools/profile-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
+import { timeNowTool } from "../features/tools/time-now-tool.js";
 
 export interface ServerContext {
   config: AppConfig;
   logger: Logger;
   toolRegistry: ToolRegistry;
+  mcpRuntime?: McpRuntimeManager;
   households?: HouseholdRepository;
   persons?: PersonRepository;
   identities?: IdentityRepository;
+  integrations?: IntegrationRepository;
   identityResolution?: IdentityResolutionService;
   orchestration?: OrchestrationService;
   requestIntake?: RequestIntakeService;
@@ -46,14 +49,18 @@ export interface ServerContext {
 
 export async function createServerContext(config: AppConfig, logger: Logger): Promise<ServerContext> {
   const toolRegistry = new ToolRegistry();
+  const mcpRuntime = new McpRuntimeManager();
   toolRegistry.register(systemHealthTool);
+  toolRegistry.register(timeNowTool);
 
   if (!config.databaseUrl) {
     return {
       config,
       logger,
       toolRegistry,
+      mcpRuntime,
       async close() {
+        await mcpRuntime.stopAll();
         return Promise.resolve();
       }
     };
@@ -79,7 +86,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   toolRegistry.register(createAssistantProfileSetTool(profiles));
   await registerDynamicMcpTools({
     integrations,
-    mcpClient: new McpStdioClient(),
+    runtimeManager: mcpRuntime,
     register: (tool) => toolRegistry.register(tool)
   });
   const provider = config.openAiApiKey
@@ -101,13 +108,16 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
     config,
     logger,
     toolRegistry,
+    mcpRuntime,
     households,
     persons,
     identities,
+    integrations,
     identityResolution,
     orchestration,
     requestIntake,
     async close() {
+      await mcpRuntime.stopAll();
       await pool.end();
     }
   };

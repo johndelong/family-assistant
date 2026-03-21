@@ -12,6 +12,12 @@ export interface OrchestratedResponse {
   model?: string;
   trace?: {
     usedTools?: string[];
+    toolTrace?: Array<{
+      toolName: string;
+      arguments: string;
+      output?: string;
+      error?: string;
+    }>;
     relevantMemories?: RetrievedMemory[];
     profileContext?: PromptProfileContext;
     sessionContext?: SessionContext;
@@ -147,6 +153,7 @@ export class OrchestrationService {
         model: response.model,
         trace: {
           usedTools: response.usedTools,
+          toolTrace: response.toolTrace,
           relevantMemories,
           ...(sessionContext ? { sessionContext } : {}),
           ...(profileContext ? { profileContext } : {})

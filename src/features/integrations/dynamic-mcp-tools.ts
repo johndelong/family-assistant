@@ -2,11 +2,11 @@ import { z } from "zod";
 import type { Tool } from "../../core/tools.js";
 import type { IntegrationConnection, IntegrationExposedTool } from "../../core/domain.js";
 import { IntegrationRepository } from "./repository.js";
-import { McpStdioClient } from "./mcp-stdio-client.js";
+import { McpRuntimeManager } from "../mcp/runtime-manager.js";
 
 export async function registerDynamicMcpTools(input: {
   integrations: IntegrationRepository;
-  mcpClient: McpStdioClient;
+  runtimeManager: McpRuntimeManager;
   register(tool: Tool<Record<string, unknown>, unknown>): void;
 }): Promise<void> {
   const discovered = await input.integrations.listEnabledExposedTools();
@@ -16,29 +16,50 @@ export async function registerDynamicMcpTools(input: {
       connection: item.connection,
       exposedTool: item.tool,
       integrations: input.integrations,
-      mcpClient: input.mcpClient
+      runtimeManager: input.runtimeManager
     }));
   }
+}
+
+export function registerDynamicMcpTool(input: {
+  connection: IntegrationConnection;
+  exposedTool: IntegrationExposedTool;
+  integrations: IntegrationRepository;
+  runtimeManager: McpRuntimeManager;
+  register(tool: Tool<Record<string, unknown>, unknown>): void;
+}): void {
+  input.register(createDynamicMcpTool({
+    connection: input.connection,
+    exposedTool: input.exposedTool,
+    integrations: input.integrations,
+    runtimeManager: input.runtimeManager
+  }));
 }
 
 function createDynamicMcpTool(input: {
   connection: IntegrationConnection;
   exposedTool: IntegrationExposedTool;
   integrations: IntegrationRepository;
-  mcpClient: McpStdioClient;
+  runtimeManager: McpRuntimeManager;
 }): Tool<Record<string, unknown>, unknown> {
+  const policy = inferMcpToolPolicy(input.exposedTool.toolName, input.exposedTool.description);
+
   return {
     id: buildDynamicToolId(input.connection.id, input.exposedTool.toolName),
     description: input.exposedTool.description,
     inputSchema: z.object({}).passthrough(),
     inputJsonSchema: input.exposedTool.inputJsonSchema,
     requiredCapabilities: [],
-    exposure: "conversation",
-    approvalPolicy: "never",
-    targetScope: "owner_shared",
+    exposure: policy.exposure,
+    approvalPolicy: policy.approvalPolicy,
+    targetScope: policy.targetScope,
     async execute(toolInput, context): Promise<unknown> {
       if (!context.person) {
         throw new Error("A resolved person is required to call dynamic MCP tools");
+      }
+
+      if (policy.targetScope === "self" && context.person.id !== input.connection.personId) {
+        throw new Error("This tool can only be used by the owner of the connected account");
       }
 
       const canAccess = await input.integrations.canAccessTool({
@@ -50,9 +71,7 @@ function createDynamicMcpTool(input: {
       if (!canAccess) {
         throw new Error("You do not have access to this tool on the connected account");
       }
-
-      const transport = parseMcpTransport(input.connection);
-      return input.mcpClient.callTool(transport, {
+      return input.runtimeManager.callTool(input.connection, {
         name: input.exposedTool.toolName,
         arguments: toolInput
       });
@@ -64,46 +83,70 @@ export function buildDynamicToolId(connectionId: string, toolName: string): stri
   return `mcp.${connectionId}.${toolName}`;
 }
 
-function parseMcpTransport(connection: IntegrationConnection): {
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
+function inferMcpToolPolicy(
+  toolName: string,
+  description: string
+): {
+  kind: "auth" | "account" | "read" | "write" | "destructive" | "unknown";
+  exposure: "conversation" | "cli_only";
+  approvalPolicy: "never" | "confirm" | "admin_only";
+  targetScope: "self" | "household" | "owner_shared" | "system";
 } {
-  const metadata = connection.metadata ?? {};
-  const command = metadata.command;
-  const args = metadata.args;
-  const cwd = metadata.cwd;
-  const env = metadata.env;
+  const haystack = `${toolName} ${description}`.toLowerCase();
 
-  if (typeof command !== "string" || command.trim().length === 0) {
-    throw new Error(`MCP connection ${connection.id} is missing metadata.command`);
+  if (matchesAny(haystack, ["authenticate", "oauth", "login", "sign in", "connect account", "complete auth", "reauth"])) {
+    return {
+      kind: "auth",
+      exposure: "conversation",
+      approvalPolicy: "never",
+      targetScope: "self"
+    };
   }
 
-  if (args !== undefined && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) {
-    throw new Error(`MCP connection ${connection.id} has invalid metadata.args`);
+  if (matchesAny(haystack, ["list accounts", "workspace account", "account status", "connected account"])) {
+    return {
+      kind: "account",
+      exposure: "conversation",
+      approvalPolicy: "never",
+      targetScope: "self"
+    };
   }
 
-  if (cwd !== undefined && typeof cwd !== "string") {
-    throw new Error(`MCP connection ${connection.id} has invalid metadata.cwd`);
+  if (matchesAny(haystack, ["delete", "remove", "disconnect", "revoke", "purge", "destroy"])) {
+    return {
+      kind: "destructive",
+      exposure: "conversation",
+      approvalPolicy: "confirm",
+      targetScope: "self"
+    };
   }
 
-  if (
-    env !== undefined &&
-    (
-      typeof env !== "object" ||
-      env === null ||
-      Array.isArray(env) ||
-      Object.values(env).some((value) => typeof value !== "string")
-    )
-  ) {
-    throw new Error(`MCP connection ${connection.id} has invalid metadata.env`);
+  if (matchesAny(haystack, ["create", "update", "manage", "send", "upload", "assign", "write", "modify"])) {
+    return {
+      kind: "write",
+      exposure: "conversation",
+      approvalPolicy: "confirm",
+      targetScope: "self"
+    };
+  }
+
+  if (matchesAny(haystack, ["list", "get", "search", "read", "download", "fetch"])) {
+    return {
+      kind: "read",
+      exposure: "conversation",
+      approvalPolicy: "never",
+      targetScope: "owner_shared"
+    };
   }
 
   return {
-    command,
-    ...(Array.isArray(args) ? { args: args as string[] } : {}),
-    ...(typeof cwd === "string" ? { cwd } : {}),
-    ...(env ? { env: env as Record<string, string> } : {})
+    kind: "unknown",
+    exposure: "cli_only",
+    approvalPolicy: "admin_only",
+    targetScope: "self"
   };
+}
+
+function matchesAny(haystack: string, needles: string[]): boolean {
+  return needles.some((needle) => haystack.includes(needle));
 }

@@ -97,7 +97,8 @@ export class TelegramAdapter implements ChannelAdapter {
         message: inbound
       });
 
-      await ctx.reply(formatAcceptedRequestForUser(outcome));
+      const replyText = formatAcceptedRequestForUser(outcome).trim() || "I processed that, but I do not have a message to send yet.";
+      await ctx.reply(replyText);
     } finally {
       stopTyping();
     }

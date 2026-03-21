@@ -8,7 +8,7 @@ import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
 import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-tools.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
-import { McpStdioClient } from "../features/integrations/mcp-stdio-client.js";
+import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
 import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { PersonRepository } from "../features/persons/repository.js";
@@ -29,6 +29,7 @@ import {
   createPersonProfileSetTool
 } from "../features/tools/profile-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
+import { timeNowTool } from "../features/tools/time-now-tool.js";
 import type { AppConfig } from "../shared/config.js";
 
 export interface CliContext {
@@ -38,6 +39,7 @@ export interface CliContext {
   persons: PersonRepository;
   identities: IdentityRepository;
   integrations: IntegrationRepository;
+  mcpRuntime: McpRuntimeManager;
   profiles: ProfileRepository;
   requestIntake: RequestIntakeService;
 }
@@ -51,6 +53,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   await ensureSchema(db);
 
   const toolRegistry = new ToolRegistry();
+  const mcpRuntime = new McpRuntimeManager();
   const memory = new MemoryRepository(db);
   const memoryRetrieval = new MemoryRetrievalService(memory);
   const profiles = new ProfileRepository(db);
@@ -58,6 +61,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   toolRegistry.register(systemHealthTool);
+  toolRegistry.register(timeNowTool);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
   toolRegistry.register(createPersonProfileSetTool(profiles));
@@ -65,7 +69,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   toolRegistry.register(createAssistantProfileSetTool(profiles));
   await registerDynamicMcpTools({
     integrations,
-    mcpClient: new McpStdioClient(),
+    runtimeManager: mcpRuntime,
     register: (tool) => toolRegistry.register(tool)
   });
 
@@ -93,9 +97,11 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
     persons,
     identities,
     integrations,
+    mcpRuntime,
     profiles,
     requestIntake,
     async close() {
+      await mcpRuntime.stopAll();
       await pool.end();
     }
   };

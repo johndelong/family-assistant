@@ -1,6 +1,6 @@
 import type { Person } from "../../core/domain.js";
 import type { InboundMessage } from "../../core/channels.js";
-import type { LlmProvider } from "./provider.js";
+import type { LlmProvider, LlmToolTrace } from "./provider.js";
 import type { ToolRegistry } from "../../core/tools.js";
 import type { RetrievedMemory } from "../memory/retrieval-service.js";
 import type { PromptProfileContext } from "../profiles/prompt-profile-service.js";
@@ -40,7 +40,7 @@ export class LlmService {
 
     return {
       model: result.model,
-      text: result.outputText.trim()
+      text: coerceAssistantText(result.outputText, "I processed that, but I do not have a response ready yet.")
     };
   }
 
@@ -52,7 +52,7 @@ export class LlmService {
     relevantMemories?: RetrievedMemory[] | undefined;
     profileContext?: PromptProfileContext | undefined;
     sessionContext?: SessionContext | undefined;
-  }): Promise<{ model: string; text: string; usedTools: string[] }> {
+  }): Promise<{ model: string; text: string; usedTools: string[]; toolTrace: LlmToolTrace[] }> {
     const tools = input.toolRegistry
       .listConversationTools()
       .filter((tool) => tool.inputJsonSchema)
@@ -60,7 +60,7 @@ export class LlmService {
         internalName: tool.id,
         name: toOpenAiToolName(tool.id),
         description: tool.description,
-        parameters: tool.inputJsonSchema ?? {}
+        parameters: normalizeForOpenAi(tool.inputJsonSchema ?? {})
       }));
 
     let response = await this.provider.generateWithTools({
@@ -86,6 +86,7 @@ export class LlmService {
     });
 
     const usedTools: string[] = [];
+    const toolTrace: LlmToolTrace[] = [];
 
     for (let i = 0; i < 5 && response.toolCalls.length > 0; i += 1) {
       const toolOutputs: Array<{ toolCallId: string; output: string }> = [];
@@ -97,17 +98,38 @@ export class LlmService {
           throw new Error(`Unknown tool call from model: ${toolCall.name}`);
         }
 
-        const result = await input.toolRegistry.execute(tool.internalName, parsedArgs, {
-          requestId: input.requestId,
-          invocationSource: "conversation",
-          person: input.person
-        });
+        try {
+          const result = await input.toolRegistry.execute(tool.internalName, parsedArgs, {
+            requestId: input.requestId,
+            invocationSource: "conversation",
+            person: input.person
+          });
 
-        usedTools.push(tool.internalName);
-        toolOutputs.push({
-          toolCallId: toolCall.id,
-          output: JSON.stringify(result)
-        });
+          usedTools.push(tool.internalName);
+          const serializedOutput = JSON.stringify(result);
+          toolTrace.push({
+            toolName: tool.internalName,
+            arguments: toolCall.arguments || "{}",
+            output: serializedOutput
+          });
+          toolOutputs.push({
+            toolCallId: toolCall.id,
+            output: serializedOutput
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          toolTrace.push({
+            toolName: tool.internalName,
+            arguments: toolCall.arguments || "{}",
+            error: message
+          });
+          toolOutputs.push({
+            toolCallId: toolCall.id,
+            output: JSON.stringify({
+              error: message
+            })
+          });
+        }
       }
 
       const followUpInput: Parameters<LlmProvider["generateWithTools"]>[0] = {
@@ -126,14 +148,144 @@ export class LlmService {
 
     return {
       model: response.model,
-      text: response.outputText.trim(),
-      usedTools
+      text: coerceAssistantText(
+        response.outputText,
+        usedTools.length > 0
+          ? "I checked that, but I could not summarize the result clearly yet."
+          : "I processed that, but I do not have a response ready yet."
+      ),
+      usedTools,
+      toolTrace
     };
   }
 }
 
 function toOpenAiToolName(toolId: string): string {
   return toolId.replace(/[^\w-]/g, "_");
+}
+
+function normalizeForOpenAi(schema: Record<string, unknown>): Record<string, unknown> {
+  return normalizeSchemaNode(schema);
+}
+
+function normalizeSchemaNode(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    };
+  }
+
+  const schema = unwrapComposedSchema(value as Record<string, unknown>);
+  const type = schema.type;
+
+  if (type === "object" || schema.properties) {
+    const rawProperties = (
+      schema.properties &&
+      typeof schema.properties === "object" &&
+      !Array.isArray(schema.properties)
+    )
+      ? schema.properties as Record<string, unknown>
+      : {};
+
+    const properties = Object.fromEntries(
+      Object.entries(rawProperties).map(([key, propertyValue]) => [key, normalizePropertyNode(propertyValue)])
+    );
+    const propertyNames = Object.keys(properties);
+
+    return {
+      ...schema,
+      type: "object",
+      properties,
+      required: propertyNames,
+      additionalProperties: false
+    };
+  }
+
+  if (type === "array") {
+    return {
+      ...schema,
+      type: "array",
+      ...(schema.items ? { items: normalizePropertyNode(schema.items) } : {})
+    };
+  }
+
+  return schema;
+}
+
+function normalizePropertyNode(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { type: "string" };
+  }
+
+  const schema = unwrapComposedSchema(value as Record<string, unknown>);
+
+  if (schema.type === "object" || schema.properties) {
+    const normalizedObject = normalizeSchemaNode(schema);
+    const propertyNames = Object.keys((normalizedObject.properties as Record<string, unknown>) ?? {});
+
+    if (propertyNames.length === 0) {
+      return normalizedObject;
+    }
+
+    return {
+      ...normalizedObject,
+      type: ["object", "null"]
+    };
+  }
+
+  if (schema.type === "array") {
+    return {
+      ...schema,
+      type: "array",
+      ...(schema.items ? { items: normalizePropertyNode(schema.items) } : {})
+    };
+  }
+
+  const existingType = schema.type;
+  if (typeof existingType === "string") {
+    return {
+      ...schema,
+      type: [existingType, "null"]
+    };
+  }
+
+  if (Array.isArray(existingType)) {
+    return {
+      ...schema,
+      type: existingType.includes("null") ? existingType : [...existingType, "null"]
+    };
+  }
+
+  return {
+    ...schema,
+    type: ["string", "null"]
+  };
+}
+
+function unwrapComposedSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const composed = schema.oneOf ?? schema.anyOf ?? schema.allOf;
+  if (!Array.isArray(composed) || composed.length === 0) {
+    const { oneOf: _oneOf, anyOf: _anyOf, allOf: _allOf, ...rest } = schema;
+    return rest;
+  }
+
+  const [firstBranch] = composed;
+  const branch = (
+    firstBranch &&
+    typeof firstBranch === "object" &&
+    !Array.isArray(firstBranch)
+  )
+    ? unwrapComposedSchema(firstBranch as Record<string, unknown>)
+    : {};
+
+  const { oneOf: _oneOf, anyOf: _anyOf, allOf: _allOf, ...rest } = schema;
+  return {
+    ...rest,
+    ...branch
+  };
 }
 
 function buildMemoryContext(memories: RetrievedMemory[]): string {
@@ -177,10 +329,16 @@ function buildBaseSystemPrompt(
   const sections = [
     "You are a helpful household assistant.",
     "You already know the user's identity from application code.",
+    buildStableTimeContext(),
     profileContext ? buildProfileContext(profileContext) : undefined,
     enableTools
       ? [
           "Use tools when they help answer accurately.",
+          "Use time.now whenever you need the exact current date, current time, or exact interpretation of words like today, tomorrow, or this week.",
+          "When a task depends on external data, connected accounts, recipient resolution, provider capabilities, or other information outside the conversation, take a best-effort multi-step approach with the available tools before asking the user to repeat information you may be able to resolve yourself.",
+          "Do not claim that you checked a system, account, inbox, calendar, contacts source, or external service unless you actually used tools and got results back.",
+          "If you are unsure what tools or connected accounts are available, inspect them first with tool.catalog or account.status.",
+          "When tool results suggest a next step, continue reasoning from those results instead of stopping early.",
           "Use memory.store to save durable context only when the user is clearly asking you to remember something for later.",
           "Choose scope='private' for person-specific preferences or facts, and scope='shared' for household-wide routines, schedules, or family context.",
           "The profile sections in this prompt reflect the current persisted assistant style and user preferences.",
@@ -223,4 +381,20 @@ function buildProfileContext(profileContext: PromptProfileContext): string {
       ? `Person Preferences (current person only):\n${profileContext.personPreferences}`
       : "Person Preferences (current person only):\n(not set)"
   ].join("\n\n");
+}
+
+function coerceAssistantText(value: string, fallback: string): string {
+  const text = value.trim();
+  return text.length > 0 ? text : fallback;
+}
+
+function buildStableTimeContext(): string {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+  return [
+    "Time interpretation context:",
+    `Timezone: ${timezone}`,
+    "Interpret relative time references like today, tomorrow, this week, morning, and evening in this timezone.",
+    "Use the time.now tool when you need the exact current date or current time."
+  ].join("\n");
 }

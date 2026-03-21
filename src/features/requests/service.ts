@@ -68,6 +68,7 @@ export class RequestIntakeService {
         payload: response.model ? {
           model: response.model,
           usedTools: response.trace?.usedTools ?? [],
+          toolTrace: summarizeToolTrace(response.trace?.toolTrace ?? []),
           relevantMemories: summarizeRelevantMemories(response.trace?.relevantMemories ?? []),
           profileContext: summarizeProfileContext(response.trace?.profileContext),
           sessionContext: summarizeSessionContext(response.trace?.sessionContext)
@@ -205,4 +206,23 @@ function summarizeSessionContext(sessionContext: {
       preview: summarizeText(message.content)
     }))
   };
+}
+
+function summarizeToolTrace(toolTrace: Array<{
+  toolName: string;
+  arguments: string;
+  output?: string;
+  error?: string;
+}>): Array<{
+  toolName: string;
+  argumentsPreview: string;
+  outputPreview?: string;
+  error?: string;
+}> {
+  return toolTrace.map((entry) => ({
+    toolName: entry.toolName,
+    argumentsPreview: summarizeText(entry.arguments),
+    ...(entry.output ? { outputPreview: summarizeText(entry.output) } : {}),
+    ...(entry.error ? { error: summarizeText(entry.error) } : {})
+  }));
 }
