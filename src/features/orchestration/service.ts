@@ -1,6 +1,7 @@
 import type { InboundMessage } from "../../core/channels.js";
 import type { Person } from "../../core/domain.js";
 import type { ToolRegistry } from "../../core/tools.js";
+import type { DirectActionTrace } from "../direct-actions/executor.js";
 import { LlmService } from "../llm/service.js";
 import type { MemoryRetrievalService, RetrievedMemory } from "../memory/retrieval-service.js";
 import type { PromptProfileContext, PromptProfileService } from "../profiles/prompt-profile-service.js";
@@ -10,7 +11,13 @@ export interface OrchestratedResponse {
   route: "direct_response" | "tool_execution" | "llm_response";
   content: string;
   model?: string;
-  trace?: {
+    trace?: {
+    directAction?: DirectActionTrace;
+    integrationPrompts?: Array<{
+      connectionId: string;
+      integrationKey: string;
+      promptName: string;
+    }>;
     usedTools?: string[];
     toolTrace?: Array<{
       toolName: string;
@@ -18,6 +25,20 @@ export interface OrchestratedResponse {
       output?: string;
       error?: string;
     }>;
+    timing?: {
+      llmStartedAt?: string;
+      llmCompletedAt?: string;
+      firstToolCallAt?: string;
+      firstToolCallMs?: number;
+      totalLlmMs?: number;
+      toolCalls?: Array<{
+        toolName: string;
+        startedAt: string;
+        completedAt: string;
+        durationMs: number;
+        success: boolean;
+      }>;
+    };
     toolSelectionTrace?: Array<{
       toolId: string;
       score: number;
@@ -46,6 +67,7 @@ export class OrchestrationService {
   }): Promise<OrchestratedResponse> {
     const rawText = input.message.text.trim();
     const normalizedText = rawText.toLowerCase();
+    const requestMode = classifyRequestMode(rawText);
 
     if (
       normalizedText === "health" ||
@@ -118,7 +140,11 @@ export class OrchestrationService {
     }
 
     if (this.llmService) {
-      await input.onProgress?.("Thinking through that...");
+      await input.onProgress?.(
+        requestMode === "direct_action"
+          ? "Taking action..."
+          : "Thinking through that..."
+      );
       const profileContext = this.promptProfileService
         ? await this.promptProfileService.buildContextForPerson(input.person)
         : undefined;
@@ -141,6 +167,7 @@ export class OrchestrationService {
         person: input.person,
         message: input.message,
         toolRegistry: this.toolRegistry,
+        requestMode,
         relevantMemories,
         profileContext,
         sessionContext,
@@ -163,8 +190,19 @@ export class OrchestrationService {
         content: finalText,
         model: response.model,
         trace: {
+          ...(response.directActionTrace
+            ? {
+                directAction: response.directActionTrace
+              }
+            : {}),
+          ...(response.integrationPrompts
+            ? {
+                integrationPrompts: response.integrationPrompts
+              }
+            : {}),
           usedTools: response.usedTools,
           toolTrace: response.toolTrace,
+          ...(response.timing ? { timing: response.timing } : {}),
           toolSelectionTrace: response.toolSelectionTrace,
           relevantMemories,
           ...(sessionContext ? { sessionContext } : {}),
@@ -178,6 +216,46 @@ export class OrchestrationService {
       content: `I recognized you as ${input.person.name} and received your message: "${input.message.text}". Tool routing and LLM orchestration are the next layer to add.`
     };
   }
+}
+
+function classifyRequestMode(messageText: string): "default" | "direct_action" {
+  const normalized = messageText.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return "default";
+  }
+
+  const likelyQuestion = /^(what|when|where|why|how|who|which)\b/.test(normalized) || normalized.includes("?");
+  if (likelyQuestion) {
+    return "default";
+  }
+
+  const directActionPatterns = [
+    /\bturn (on|off)\b/,
+    /\bswitch (on|off)\b/,
+    /\bset\b/,
+    /\bdim\b/,
+    /\bbrighten\b/,
+    /\bsend\b/,
+    /\bemail\b/,
+    /\btext\b/,
+    /\bannounce\b/,
+    /\bbroadcast\b/,
+    /\bcreate\b/,
+    /\bschedule\b/,
+    /\bcancel\b/,
+    /\bdelete\b/,
+    /\bremove\b/,
+    /\bstart\b/,
+    /\bstop\b/,
+    /\block\b/,
+    /\bunlock\b/,
+    /\bopen\b/,
+    /\bclose\b/
+  ];
+
+  return directActionPatterns.some((pattern) => pattern.test(normalized))
+    ? "direct_action"
+    : "default";
 }
 
 function shouldRequireToolBackedCompletion(messageText: string, usedTools: string[]): boolean {

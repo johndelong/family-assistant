@@ -5,12 +5,17 @@ import type { ToolRegistry } from "../../core/tools.js";
 import type { RetrievedMemory } from "../memory/retrieval-service.js";
 import type { PromptProfileContext } from "../profiles/prompt-profile-service.js";
 import type { SessionContext } from "../sessions/service.js";
+import type { McpPromptService } from "../integrations/mcp-prompt-service.js";
+import type { DirectActionTrace } from "../direct-actions/executor.js";
 import { readPromptFragment } from "./prompt-fragments.js";
 import { selectRelevantTools } from "./tool-selection.js";
 import { applySkillExecutionGuards, applyToolSkills } from "./tool-skills.js";
 
 export class LlmService {
-  constructor(private readonly provider: LlmProvider) {}
+  constructor(
+    private readonly provider: LlmProvider,
+    private readonly mcpPromptService?: McpPromptService
+  ) {}
 
   async respond(input: {
     requestId: string;
@@ -52,6 +57,9 @@ export class LlmService {
     person: Person;
     message: InboundMessage;
     toolRegistry: ToolRegistry;
+    allowedToolIds?: string[] | undefined;
+    integrationPromptSections?: string[] | undefined;
+    requestMode?: "default" | "direct_action";
     relevantMemories?: RetrievedMemory[] | undefined;
     profileContext?: PromptProfileContext | undefined;
     sessionContext?: SessionContext | undefined;
@@ -62,21 +70,65 @@ export class LlmService {
     usedTools: string[];
     toolTrace: LlmToolTrace[];
     toolSelectionTrace: LlmToolSelectionTrace[];
+    directActionTrace?: DirectActionTrace;
+    integrationPrompts?: Array<{
+      connectionId: string;
+      integrationKey: string;
+      promptName: string;
+    }>;
+    timing: {
+      llmStartedAt: string;
+      llmCompletedAt: string;
+      firstToolCallAt?: string;
+      firstToolCallMs?: number;
+      totalLlmMs: number;
+      toolCalls: Array<{
+        toolName: string;
+        startedAt: string;
+        completedAt: string;
+        durationMs: number;
+        success: boolean;
+      }>;
+    };
   }> {
+    const llmStartedAt = new Date();
+    const conversationTools = input.allowedToolIds
+      ? input.toolRegistry
+          .listConversationTools()
+          .filter((tool) => input.allowedToolIds?.includes(tool.id))
+      : input.toolRegistry.listConversationTools();
+
     const selection = selectRelevantTools({
       messageText: input.message.text,
       person: input.person,
-      tools: input.toolRegistry.listConversationTools(),
-      sessionContext: input.sessionContext
+      tools: conversationTools,
+      sessionContext: input.sessionContext,
+      ...(input.requestMode === "direct_action" ? { maxTools: 12 } : {})
     });
 
     const skillContext = applyToolSkills({
       messageText: input.message.text,
+      ...(input.requestMode ? { requestMode: input.requestMode } : {}),
       sessionContext: input.sessionContext,
-      allTools: input.toolRegistry.listConversationTools(),
+      allTools: conversationTools,
       selectedTools: selection.selectedTools,
       trace: selection.trace
     });
+    const integrationPrompts = input.integrationPromptSections
+      ? input.integrationPromptSections.map((content) => ({
+          connectionId: "external",
+          integrationKey: "external",
+          promptName: "external",
+          content
+        }))
+      : (
+      skillContext.directActionShortcut && this.mcpPromptService
+        ? await this.mcpPromptService.buildPromptSections({
+            toolIds: skillContext.directActionShortcut.toolIds,
+            maxPromptsPerConnection: 2
+          })
+        : []
+    );
 
     const tools = skillContext.selectedTools
       .filter((tool) => tool.inputJsonSchema)
@@ -90,11 +142,16 @@ export class LlmService {
 
     let response = await this.provider.generateWithTools({
       requestId: input.requestId,
+      ...(input.requestMode ? { modelHint: input.requestMode } : {}),
       messages: [
         {
           role: "system",
           content: buildBaseSystemPrompt(input.profileContext, true)
         },
+        ...(integrationPrompts.map((prompt) => ({
+          role: "system" as const,
+          content: prompt.content
+        }))),
         ...skillContext.systemPromptSections.map((content) => ({
           role: "system" as const,
           content
@@ -116,6 +173,14 @@ export class LlmService {
 
     const usedTools: string[] = [];
     const toolTrace: LlmToolTrace[] = [];
+    const toolTimings: Array<{
+      toolName: string;
+      startedAt: string;
+      completedAt: string;
+      durationMs: number;
+      success: boolean;
+    }> = [];
+    let firstToolCallAt: Date | undefined;
 
     for (let i = 0; i < 5 && response.toolCalls.length > 0; i += 1) {
       const toolOutputs: Array<{ toolCallId: string; output: string }> = [];
@@ -135,6 +200,8 @@ export class LlmService {
         });
 
         await input.onProgress?.(describeToolWork(tool.internalName, tool.description));
+        const toolStartedAt = new Date();
+        firstToolCallAt ??= toolStartedAt;
 
         try {
           const result = await input.toolRegistry.execute(tool.internalName, executedArgs ?? {}, {
@@ -145,10 +212,18 @@ export class LlmService {
 
           usedTools.push(tool.internalName);
           const serializedOutput = JSON.stringify(result);
+          const toolCompletedAt = new Date();
           toolTrace.push({
             toolName: tool.internalName,
             arguments: JSON.stringify(executedArgs ?? {}),
             output: serializedOutput
+          });
+          toolTimings.push({
+            toolName: tool.internalName,
+            startedAt: toolStartedAt.toISOString(),
+            completedAt: toolCompletedAt.toISOString(),
+            durationMs: toolCompletedAt.getTime() - toolStartedAt.getTime(),
+            success: true
           });
           toolOutputs.push({
             toolCallId: toolCall.id,
@@ -156,10 +231,18 @@ export class LlmService {
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          const toolCompletedAt = new Date();
           toolTrace.push({
             toolName: tool.internalName,
             arguments: JSON.stringify(executedArgs ?? {}),
             error: message
+          });
+          toolTimings.push({
+            toolName: tool.internalName,
+            startedAt: toolStartedAt.toISOString(),
+            completedAt: toolCompletedAt.toISOString(),
+            durationMs: toolCompletedAt.getTime() - toolStartedAt.getTime(),
+            success: false
           });
           toolOutputs.push({
             toolCallId: toolCall.id,
@@ -172,6 +255,7 @@ export class LlmService {
 
       const followUpInput: Parameters<LlmProvider["generateWithTools"]>[0] = {
         requestId: input.requestId,
+        ...(input.requestMode ? { modelHint: input.requestMode } : {}),
         messages: [],
         tools,
         toolOutputs
@@ -184,6 +268,8 @@ export class LlmService {
       response = await this.provider.generateWithTools(followUpInput);
     }
 
+    const llmCompletedAt = new Date();
+
     return {
       model: response.model,
       text: coerceAssistantText(
@@ -194,9 +280,51 @@ export class LlmService {
       ),
       usedTools,
       toolTrace,
-      toolSelectionTrace: skillContext.trace
+      toolSelectionTrace: skillContext.trace,
+      ...(integrationPrompts.length > 0
+        ? {
+            integrationPrompts: integrationPrompts.map((prompt) => ({
+              connectionId: prompt.connectionId,
+              integrationKey: prompt.integrationKey,
+              promptName: prompt.promptName
+            }))
+          }
+        : {}),
+      ...(skillContext.directActionShortcut
+        ? {
+            directActionTrace: buildDirectActionShortcutTrace(skillContext.directActionShortcut)
+          }
+        : {}),
+      timing: {
+        llmStartedAt: llmStartedAt.toISOString(),
+        llmCompletedAt: llmCompletedAt.toISOString(),
+        ...(firstToolCallAt
+          ? {
+              firstToolCallAt: firstToolCallAt.toISOString(),
+              firstToolCallMs: firstToolCallAt.getTime() - llmStartedAt.getTime()
+            }
+          : {}),
+        totalLlmMs: llmCompletedAt.getTime() - llmStartedAt.getTime(),
+        toolCalls: toolTimings
+      }
     };
   }
+}
+
+function buildDirectActionShortcutTrace(input: {
+  skillName: string;
+  toolIds: string[];
+}): DirectActionTrace {
+  return {
+    executorId: input.skillName,
+    steps: [
+      {
+        kind: "resolve",
+        success: true,
+        detail: `Narrowed direct-action toolset to ${input.toolIds.length} tool(s).`
+      }
+    ]
+  };
 }
 
 function describeToolWork(toolId: string, description: string): string {

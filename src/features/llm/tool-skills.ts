@@ -16,6 +16,9 @@ interface SkillManifest {
     messageAny?: string[];
   };
   forceIncludeMatchingTools?: boolean;
+  directAction?: {
+    runtime: string;
+  };
   executionGuards?: SkillExecutionGuard[];
 }
 
@@ -31,6 +34,7 @@ interface SkillExecutionGuard {
 
 export function applyToolSkills(input: {
   messageText: string;
+  requestMode?: "default" | "direct_action";
   sessionContext?: SessionContext | undefined;
   allTools: Tool<unknown, unknown>[];
   selectedTools: Tool<unknown, unknown>[];
@@ -40,11 +44,21 @@ export function applyToolSkills(input: {
   systemPromptSections: string[];
   trace: ToolSelectionTraceEntry[];
   executionGuards: SkillExecutionGuard[];
+  directActionShortcut?: {
+    skillName: string;
+    toolIds: string[];
+  };
 } {
   let selectedTools = input.selectedTools;
   let trace = input.trace;
   const systemPromptSections: string[] = [];
   const executionGuards: SkillExecutionGuard[] = [];
+  let directActionShortcut:
+    | {
+        skillName: string;
+        toolIds: string[];
+      }
+    | undefined;
 
   for (const manifest of listSkillManifests()) {
     const matchingTools = input.allTools.filter((tool) => matchesToolManifest(tool.id, manifest));
@@ -61,6 +75,19 @@ export function applyToolSkills(input: {
       trace = mergeTrace(trace, matchingTools.map((tool) => tool.id));
     }
 
+    if (
+      input.requestMode === "direct_action" &&
+      !directActionShortcut &&
+      manifest.directAction?.runtime === "llm_shortcut"
+    ) {
+      selectedTools = dedupeById(matchingTools);
+      trace = mergeTrace(trace, matchingTools.map((tool) => tool.id));
+      directActionShortcut = {
+        skillName: manifest.name,
+        toolIds: matchingTools.map((tool) => tool.id)
+      };
+    }
+
     systemPromptSections.push(readSkillBody(manifest.name));
     executionGuards.push(...(manifest.executionGuards ?? []));
   }
@@ -69,7 +96,8 @@ export function applyToolSkills(input: {
     selectedTools,
     systemPromptSections,
     trace,
-    executionGuards
+    executionGuards,
+    ...(directActionShortcut ? { directActionShortcut } : {})
   };
 }
 

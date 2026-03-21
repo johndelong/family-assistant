@@ -10,23 +10,27 @@ import type {
 interface OpenAiProviderOptions {
   apiKey: string;
   model: string;
+  directActionModel?: string;
 }
 
 export class OpenAiProvider implements LlmProvider {
   readonly name = "openai";
   readonly #client: OpenAI;
-  readonly #model: string;
+  readonly #defaultModel: string;
+  readonly #directActionModel: string | undefined;
 
   constructor(options: OpenAiProviderOptions) {
     this.#client = new OpenAI({
       apiKey: options.apiKey
     });
-    this.#model = options.model;
+    this.#defaultModel = options.model;
+    this.#directActionModel = options.directActionModel;
   }
 
   async generate(input: LlmGenerateParams): Promise<LlmGenerateResult> {
+    const model = this.#resolveModel(input.modelHint);
     const response = await this.#client.responses.create({
-      model: this.#model,
+      model,
       input: input.messages.map((message) => ({
         role: message.role,
         content: message.content
@@ -34,7 +38,7 @@ export class OpenAiProvider implements LlmProvider {
     });
 
     return {
-      model: this.#model,
+      model,
       outputText: response.output_text
     };
   }
@@ -51,8 +55,9 @@ export class OpenAiProvider implements LlmProvider {
       output: string;
     }>;
   }): Promise<LlmToolResponse> {
+    const model = this.#resolveModel(input.modelHint);
     const response = await this.#client.responses.create({
-      model: this.#model,
+      model,
       input: input.toolOutputs
         ? input.toolOutputs.map((item) => ({
             type: "function_call_output" as const,
@@ -83,10 +88,18 @@ export class OpenAiProvider implements LlmProvider {
       }));
 
     return {
-      model: this.#model,
+      model,
       outputText: response.output_text,
       toolCalls,
       responseId: response.id
     };
+  }
+
+  #resolveModel(modelHint: "default" | "direct_action" | undefined): string {
+    if (modelHint === "direct_action" && this.#directActionModel) {
+      return this.#directActionModel;
+    }
+
+    return this.#defaultModel;
   }
 }

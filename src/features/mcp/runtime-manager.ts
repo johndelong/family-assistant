@@ -27,6 +27,21 @@ export interface McpToolDefinition {
   inputSchema?: Record<string, unknown>;
 }
 
+export interface McpPromptDefinition {
+  name: string;
+  description?: string;
+  arguments?: Array<{
+    name: string;
+    description?: string;
+    required?: boolean;
+  }>;
+}
+
+export interface McpPromptMessage {
+  role: string;
+  text: string;
+}
+
 export interface McpRuntimeManagerOptions {
   defaultRequestTimeoutMs?: number;
 }
@@ -61,6 +76,64 @@ export class McpRuntimeManager {
     return session.request("tools/call", {
       name: input.name,
       arguments: input.arguments
+    });
+  }
+
+  async listPrompts(connection: IntegrationConnection): Promise<McpPromptDefinition[]> {
+    const session = await this.ensureSession(connection);
+    const result = await session.request("prompts/list");
+    const prompts = ((result as { prompts?: unknown[] }).prompts ?? []) as Array<Record<string, unknown>>;
+
+    return prompts.map((prompt) => ({
+      name: String(prompt.name),
+      ...(prompt.description ? { description: String(prompt.description) } : {}),
+      ...(Array.isArray(prompt.arguments)
+        ? {
+            arguments: prompt.arguments
+              .filter((argument) => argument && typeof argument === "object")
+              .map((argument) => ({
+                name: String((argument as { name: unknown }).name),
+                ...((argument as { description?: unknown }).description
+                  ? { description: String((argument as { description: unknown }).description) }
+                  : {}),
+                ...(typeof (argument as { required?: unknown }).required === "boolean"
+                  ? { required: Boolean((argument as { required: boolean }).required) }
+                  : {})
+              }))
+          }
+        : {})
+    }));
+  }
+
+  async getPrompt(connection: IntegrationConnection, input: {
+    name: string;
+    arguments?: Record<string, string>;
+  }): Promise<McpPromptMessage[]> {
+    const session = await this.ensureSession(connection);
+    const result = await session.request("prompts/get", {
+      name: input.name,
+      ...(input.arguments ? { arguments: input.arguments } : {})
+    });
+
+    const messages = ((result as { messages?: unknown[] }).messages ?? []) as Array<Record<string, unknown>>;
+    return messages.flatMap((message) => {
+      const role = typeof message.role === "string" ? message.role : "user";
+      const content = message.content;
+
+      if (
+        content &&
+        typeof content === "object" &&
+        !Array.isArray(content) &&
+        (content as { type?: unknown }).type === "text" &&
+        typeof (content as { text?: unknown }).text === "string"
+      ) {
+        return [{
+          role,
+          text: String((content as { text: string }).text)
+        }];
+      }
+
+      return [];
     });
   }
 

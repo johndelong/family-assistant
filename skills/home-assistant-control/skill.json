@@ -9,6 +9,9 @@
       ".HassBroadcast",
       ".GetDateTime",
       ".GetLiveContext"
+    ],
+    "idPatterns": [
+      "^smart_home\\.control$"
     ]
   },
   "activation": {
@@ -18,6 +21,9 @@
     ]
   },
   "forceIncludeMatchingTools": true,
+  "directAction": {
+    "runtime": "llm_shortcut"
+  },
   "executionGuards": [
     {
       "toolIdSuffix": ".HassLightSet",

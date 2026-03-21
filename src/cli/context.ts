@@ -7,6 +7,7 @@ import { IdentityRepository } from "../features/identity/repository.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
 import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-tools.js";
+import { McpPromptService } from "../features/integrations/mcp-prompt-service.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
 import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
 import { MemoryRepository } from "../features/memory/repository.js";
@@ -70,6 +71,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const integrations = new IntegrationRepository(db);
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
+  const mcpPromptService = new McpPromptService(integrations, mcpRuntime);
   toolRegistry.register(systemHealthTool);
   toolRegistry.register(timeNowTool);
   if (config.braveApiKey) {
@@ -96,15 +98,22 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const provider = config.openAiApiKey
     ? new OpenAiProvider({
         apiKey: config.openAiApiKey,
-        model: config.openAiModel
+        model: config.openAiModel,
+        ...(config.openAiDirectActionModel ? { directActionModel: config.openAiDirectActionModel } : {})
       })
     : undefined;
-  const llmService = provider ? new LlmService(provider) : undefined;
+  const llmService = provider ? new LlmService(provider, mcpPromptService) : undefined;
   const sessionService = new SessionService(
     sessions,
     provider ? new LlmSessionSummarizer(provider) : undefined
   );
-  const orchestration = new OrchestrationService(toolRegistry, llmService, memoryRetrieval, promptProfiles, sessionService);
+  const orchestration = new OrchestrationService(
+    toolRegistry,
+    llmService,
+    memoryRetrieval,
+    promptProfiles,
+    sessionService
+  );
   const traceWriter = new TraceWriter(config.dataDir);
   const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, runtimePreferences);
 

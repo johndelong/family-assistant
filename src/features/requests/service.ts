@@ -80,6 +80,8 @@ export class RequestIntakeService {
         payload: response.model ? {
           model: response.model,
           usedTools: response.trace?.usedTools ?? [],
+          timing: summarizeTiming(response.trace?.timing),
+          integrationPrompts: response.trace?.integrationPrompts ?? [],
           toolSelection: summarizeToolSelectionTrace(response.trace?.toolSelectionTrace ?? []),
           toolTrace: summarizeToolTrace(response.trace?.toolTrace ?? []),
           relevantMemories: summarizeRelevantMemories(response.trace?.relevantMemories ?? []),
@@ -87,7 +89,8 @@ export class RequestIntakeService {
           sessionContext: summarizeSessionContext(response.trace?.sessionContext)
         } : {
           outcome: "completed",
-          route: response.route
+          route: response.route,
+          ...(response.trace?.directAction ? { directAction: summarizeDirectActionTrace(response.trace.directAction) } : {})
         }
       });
 
@@ -100,16 +103,6 @@ export class RequestIntakeService {
             outcome: "completed",
             route: response.route,
             model: response.model
-          }
-        });
-      } else {
-        await this.traceWriter.write({
-          timestamp: new Date().toISOString(),
-          requestId: input.requestId,
-          stage: "request.completed",
-          payload: {
-            outcome: "completed",
-            route: response.route
           }
         });
       }
@@ -256,4 +249,85 @@ function summarizeToolSelectionTrace(toolSelectionTrace: Array<{
       score: entry.score,
       selected: entry.selected
     }));
+}
+
+function summarizeTiming(timing: {
+  llmStartedAt?: string;
+  llmCompletedAt?: string;
+  firstToolCallAt?: string;
+  firstToolCallMs?: number;
+  totalLlmMs?: number;
+  toolCalls?: Array<{
+    toolName: string;
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+    success: boolean;
+  }>;
+} | undefined): {
+  llmStartedAt?: string;
+  llmCompletedAt?: string;
+  firstToolCallAt?: string;
+  firstToolCallMs?: number;
+  totalLlmMs?: number;
+  toolCalls?: Array<{
+    toolName: string;
+    startedAt: string;
+    completedAt: string;
+    durationMs: number;
+    success: boolean;
+  }>;
+} | undefined {
+  if (!timing) {
+    return undefined;
+  }
+
+  return {
+    ...(timing.llmStartedAt ? { llmStartedAt: timing.llmStartedAt } : {}),
+    ...(timing.llmCompletedAt ? { llmCompletedAt: timing.llmCompletedAt } : {}),
+    ...(timing.firstToolCallAt ? { firstToolCallAt: timing.firstToolCallAt } : {}),
+    ...(typeof timing.firstToolCallMs === "number" ? { firstToolCallMs: timing.firstToolCallMs } : {}),
+    ...(typeof timing.totalLlmMs === "number" ? { totalLlmMs: timing.totalLlmMs } : {}),
+    ...(timing.toolCalls ? { toolCalls: timing.toolCalls } : {})
+  };
+}
+
+function summarizeDirectActionTrace(trace: {
+  executorId: string;
+  intent?: string;
+  target?: Record<string, unknown>;
+  steps: Array<{
+    kind: "resolve" | "tool_call" | "verify";
+    toolName?: string;
+    arguments?: Record<string, unknown>;
+    success?: boolean;
+    outputPreview?: string;
+    detail?: string;
+  }>;
+}): {
+  executorId: string;
+  intent?: string;
+  target?: Record<string, unknown>;
+  steps: Array<{
+    kind: "resolve" | "tool_call" | "verify";
+    toolName?: string;
+    arguments?: Record<string, unknown>;
+    success?: boolean;
+    outputPreview?: string;
+    detail?: string;
+  }>;
+} {
+  return {
+    executorId: trace.executorId,
+    ...(trace.intent ? { intent: trace.intent } : {}),
+    ...(trace.target ? { target: trace.target } : {}),
+    steps: trace.steps.map((step) => ({
+      kind: step.kind,
+      ...(step.toolName ? { toolName: step.toolName } : {}),
+      ...(step.arguments ? { arguments: step.arguments } : {}),
+      ...(typeof step.success === "boolean" ? { success: step.success } : {}),
+      ...(step.outputPreview ? { outputPreview: summarizeText(step.outputPreview) } : {}),
+      ...(step.detail ? { detail: summarizeText(step.detail) } : {})
+    }))
+  };
 }

@@ -5,14 +5,12 @@ description: Guidance for using this app's Home Assistant MCP tools. Use when Ho
 
 Use this skill when the request is about the current home state or controlling devices in Home Assistant.
 
-- Treat Home Assistant as a fast local control surface. Prefer immediate tool use over long deliberation.
-- For explicit control requests, call the matching action tool first, then verify with `GetLiveContext` when that would reduce uncertainty.
-- Use `name` when the user names a specific device. Use `area` when they refer to a room or area.
-- Only send slots the user actually specified or that you directly verified from tool results.
-- For named light changes, prefer the smallest valid payload, such as `name`, `domain`, and `brightness`.
-- For brightness-only requests, call `HassLightSet` with just the device `name` and `brightness`. Add `domain=["light"]` only if needed for disambiguation.
-- Do not include `temperature` for a brightness change unless the user explicitly asked to change color temperature.
-- Do not guess or fill placeholder values for `area`, `floor`, `color`, or `temperature` unless the user clearly asked for them or a tool result explicitly provided them.
-- If the request is ambiguous, use `GetLiveContext` to narrow the options or ask one short clarification that names the likely matches.
-- Keep successful smart-home replies brief and factual.
+- Treat Home Assistant as a fast, local control surface.
+- For clear control requests, move quickly to the most relevant Home Assistant action instead of exploring broadly.
+- Prefer the smallest useful tool call for the request.
+- Use `name` for a specifically named device. Use `area` when the user clearly refers to a room or area.
+- Use `GetLiveContext` to clarify ambiguity or verify a result when that adds confidence.
+- If the target is genuinely ambiguous, ask one short clarification that names the likely matches.
+- Rely on integration-provided prompt guidance when available.
+- Keep smart-home replies brief, factual, and action-oriented.
 - Never claim a device changed unless a Home Assistant tool succeeded in this turn.

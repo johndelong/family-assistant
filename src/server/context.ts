@@ -9,6 +9,7 @@ import { IdentityResolutionService } from "../features/identity/service.js";
 import { OpenAiProvider } from "../features/llm/openai-provider.js";
 import { LlmService } from "../features/llm/service.js";
 import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-tools.js";
+import { McpPromptService } from "../features/integrations/mcp-prompt-service.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
 import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
 import { MemoryRepository } from "../features/memory/repository.js";
@@ -90,6 +91,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const personPreferences = new PersonPreferenceRepository(db);
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
+  const mcpPromptService = new McpPromptService(integrations, mcpRuntime);
   const identityResolution = new IdentityResolutionService(identities, persons);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
@@ -108,15 +110,22 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const provider = config.openAiApiKey
     ? new OpenAiProvider({
         apiKey: config.openAiApiKey,
-        model: config.openAiModel
+        model: config.openAiModel,
+        ...(config.openAiDirectActionModel ? { directActionModel: config.openAiDirectActionModel } : {})
       })
     : undefined;
-  const llmService = provider ? new LlmService(provider) : undefined;
+  const llmService = provider ? new LlmService(provider, mcpPromptService) : undefined;
   const sessionService = new SessionService(
     sessions,
     provider ? new LlmSessionSummarizer(provider) : undefined
   );
-  const orchestration = new OrchestrationService(toolRegistry, llmService, memoryRetrieval, promptProfiles, sessionService);
+  const orchestration = new OrchestrationService(
+    toolRegistry,
+    llmService,
+    memoryRetrieval,
+    promptProfiles,
+    sessionService
+  );
   const traceWriter = new TraceWriter(config.dataDir);
   const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, personPreferences);
 
