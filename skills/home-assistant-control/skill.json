@@ -1,0 +1,33 @@
+{
+  "name": "home-assistant-control",
+  "toolMatchers": {
+    "idSuffixes": [
+      ".HassTurnOn",
+      ".HassTurnOff",
+      ".HassCancelAllTimers",
+      ".HassLightSet",
+      ".HassBroadcast",
+      ".GetDateTime",
+      ".GetLiveContext"
+    ]
+  },
+  "activation": {
+    "messageAll": [
+      "\\b(turn|switch|set|dim|brighten|announce|broadcast|cancel|check|status|state)\\b",
+      "\\b(light|lights|lamp|lamps|dimmer|switch|switches|device|devices|timer|timers|speaker|speakers|home|house|room|rooms)\\b"
+    ]
+  },
+  "forceIncludeMatchingTools": true,
+  "executionGuards": [
+    {
+      "toolIdSuffix": ".HassLightSet",
+      "dropFields": [
+        {
+          "field": "temperature",
+          "whenValueEquals": 0,
+          "unlessMessageMatches": "\\b(temp|temperature|kelvin|warm|cool|cooler|warmer|color)\\b"
+        }
+      ]
+    }
+  ]
+}

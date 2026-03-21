@@ -37,7 +37,6 @@ import {
 } from "../features/tools/runtime-preference-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 import { timeNowTool } from "../features/tools/time-now-tool.js";
-import { createToolCatalogTool } from "../features/tools/tool-catalog-tool.js";
 import { createWebSearchTool } from "../features/tools/web-search-tool.js";
 import type { AppConfig } from "../shared/config.js";
 
@@ -78,7 +77,6 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   }
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
-  toolRegistry.register(createToolCatalogTool(toolRegistry));
   toolRegistry.register(createAccountStatusTool(integrations));
   toolRegistry.register(createRuntimePreferenceStatusTool(runtimePreferences));
   toolRegistry.register(createSetProgressVisibilityTool(runtimePreferences));

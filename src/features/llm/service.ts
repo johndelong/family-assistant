@@ -7,6 +7,7 @@ import type { PromptProfileContext } from "../profiles/prompt-profile-service.js
 import type { SessionContext } from "../sessions/service.js";
 import { readPromptFragment } from "./prompt-fragments.js";
 import { selectRelevantTools } from "./tool-selection.js";
+import { applySkillExecutionGuards, applyToolSkills } from "./tool-skills.js";
 
 export class LlmService {
   constructor(private readonly provider: LlmProvider) {}
@@ -65,16 +66,26 @@ export class LlmService {
     const selection = selectRelevantTools({
       messageText: input.message.text,
       person: input.person,
-      tools: input.toolRegistry.listConversationTools()
+      tools: input.toolRegistry.listConversationTools(),
+      sessionContext: input.sessionContext
     });
 
-    const tools = selection.selectedTools
+    const skillContext = applyToolSkills({
+      messageText: input.message.text,
+      sessionContext: input.sessionContext,
+      allTools: input.toolRegistry.listConversationTools(),
+      selectedTools: selection.selectedTools,
+      trace: selection.trace
+    });
+
+    const tools = skillContext.selectedTools
       .filter((tool) => tool.inputJsonSchema)
       .map((tool) => ({
         internalName: tool.id,
         name: toOpenAiToolName(tool.id),
         description: tool.description,
-        parameters: normalizeForOpenAi(tool.inputJsonSchema ?? {})
+        parameters: normalizeForOpenAi(tool.inputJsonSchema ?? {}),
+        rawSchema: tool.inputJsonSchema ?? {}
       }));
 
     let response = await this.provider.generateWithTools({
@@ -84,6 +95,10 @@ export class LlmService {
           role: "system",
           content: buildBaseSystemPrompt(input.profileContext, true)
         },
+        ...skillContext.systemPromptSections.map((content) => ({
+          role: "system" as const,
+          content
+        })),
         ...(input.relevantMemories && input.relevantMemories.length > 0
           ? [{
               role: "system" as const,
@@ -111,11 +126,18 @@ export class LlmService {
         if (!tool) {
           throw new Error(`Unknown tool call from model: ${toolCall.name}`);
         }
+        const sanitizedArgs = sanitizeToolInput(parsedArgs, tool.rawSchema, true);
+        const executedArgs = applySkillExecutionGuards({
+          toolId: tool.internalName,
+          toolInput: sanitizedArgs,
+          userMessage: input.message.text,
+          guards: skillContext.executionGuards
+        });
 
         await input.onProgress?.(describeToolWork(tool.internalName, tool.description));
 
         try {
-          const result = await input.toolRegistry.execute(tool.internalName, parsedArgs, {
+          const result = await input.toolRegistry.execute(tool.internalName, executedArgs ?? {}, {
             requestId: input.requestId,
             invocationSource: "conversation",
             person: input.person
@@ -125,7 +147,7 @@ export class LlmService {
           const serializedOutput = JSON.stringify(result);
           toolTrace.push({
             toolName: tool.internalName,
-            arguments: toolCall.arguments || "{}",
+            arguments: JSON.stringify(executedArgs ?? {}),
             output: serializedOutput
           });
           toolOutputs.push({
@@ -136,7 +158,7 @@ export class LlmService {
           const message = error instanceof Error ? error.message : String(error);
           toolTrace.push({
             toolName: tool.internalName,
-            arguments: toolCall.arguments || "{}",
+            arguments: JSON.stringify(executedArgs ?? {}),
             error: message
           });
           toolOutputs.push({
@@ -172,7 +194,7 @@ export class LlmService {
       ),
       usedTools,
       toolTrace,
-      toolSelectionTrace: selection.trace
+      toolSelectionTrace: skillContext.trace
     };
   }
 }
@@ -249,17 +271,7 @@ function normalizePropertyNode(value: unknown): Record<string, unknown> {
   const schema = unwrapComposedSchema(value as Record<string, unknown>);
 
   if (schema.type === "object" || schema.properties) {
-    const normalizedObject = normalizeSchemaNode(schema);
-    const propertyNames = Object.keys((normalizedObject.properties as Record<string, unknown>) ?? {});
-
-    if (propertyNames.length === 0) {
-      return normalizedObject;
-    }
-
-    return {
-      ...normalizedObject,
-      type: ["object", "null"]
-    };
+    return normalizeSchemaNode(schema);
   }
 
   if (schema.type === "array") {
@@ -272,23 +284,89 @@ function normalizePropertyNode(value: unknown): Record<string, unknown> {
 
   const existingType = schema.type;
   if (typeof existingType === "string") {
-    return {
-      ...schema,
-      type: [existingType, "null"]
-    };
+    return schema;
   }
 
   if (Array.isArray(existingType)) {
-    return {
-      ...schema,
-      type: existingType.includes("null") ? existingType : [...existingType, "null"]
-    };
+    return schema;
   }
 
   return {
     ...schema,
-    type: ["string", "null"]
+    type: "string"
   };
+}
+
+function sanitizeToolInput(
+  value: unknown,
+  schema: unknown,
+  required: boolean
+): unknown {
+  if (value == null) {
+    return required ? value : undefined;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!required && trimmed.length === 0) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeToolInput(item, getSchemaItems(schema), false))
+      .filter((item) => item !== undefined);
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  const normalizedSchema = (
+    schema &&
+    typeof schema === "object" &&
+    !Array.isArray(schema)
+  )
+    ? unwrapComposedSchema(schema as Record<string, unknown>)
+    : {};
+
+  const rawProperties = (
+    normalizedSchema.properties &&
+    typeof normalizedSchema.properties === "object" &&
+    !Array.isArray(normalizedSchema.properties)
+  )
+    ? normalizedSchema.properties as Record<string, unknown>
+    : {};
+  const requiredKeys = new Set(
+    Array.isArray(normalizedSchema.required)
+      ? normalizedSchema.required.filter((key): key is string => typeof key === "string")
+      : []
+  );
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, childValue] of Object.entries(value as Record<string, unknown>)) {
+    const sanitizedChild = sanitizeToolInput(childValue, rawProperties[key], requiredKeys.has(key));
+    if (sanitizedChild === undefined) {
+      continue;
+    }
+
+    result[key] = sanitizedChild;
+  }
+
+  return result;
+}
+
+function getSchemaItems(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+
+  const normalizedSchema = unwrapComposedSchema(schema as Record<string, unknown>);
+  return normalizedSchema.items;
 }
 
 function unwrapComposedSchema(schema: Record<string, unknown>): Record<string, unknown> {

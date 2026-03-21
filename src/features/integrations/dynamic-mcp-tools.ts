@@ -87,7 +87,7 @@ function inferMcpToolPolicy(
   toolName: string,
   description: string
 ): {
-  kind: "auth" | "account" | "read" | "write" | "destructive" | "unknown";
+  kind: "auth" | "account" | "read" | "write" | "destructive";
   exposure: "conversation" | "cli_only";
   approvalPolicy: "never" | "confirm" | "admin_only";
   targetScope: "self" | "household" | "owner_shared" | "system";
@@ -117,16 +117,7 @@ function inferMcpToolPolicy(
       kind: "destructive",
       exposure: "conversation",
       approvalPolicy: "confirm",
-      targetScope: "self"
-    };
-  }
-
-  if (matchesAny(haystack, ["create", "update", "manage", "send", "upload", "assign", "write", "modify"])) {
-    return {
-      kind: "write",
-      exposure: "conversation",
-      approvalPolicy: "confirm",
-      targetScope: "self"
+      targetScope: "owner_shared"
     };
   }
 
@@ -140,10 +131,10 @@ function inferMcpToolPolicy(
   }
 
   return {
-    kind: "unknown",
-    exposure: "cli_only",
-    approvalPolicy: "admin_only",
-    targetScope: "self"
+    kind: "write",
+    exposure: "conversation",
+    approvalPolicy: "confirm",
+    targetScope: "owner_shared"
   };
 }
 

@@ -38,7 +38,6 @@ import {
 } from "../features/tools/runtime-preference-tools.js";
 import { systemHealthTool } from "../features/tools/system-health-tool.js";
 import { timeNowTool } from "../features/tools/time-now-tool.js";
-import { createToolCatalogTool } from "../features/tools/tool-catalog-tool.js";
 import { createWebSearchTool } from "../features/tools/web-search-tool.js";
 
 export interface ServerContext {
@@ -94,7 +93,6 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const identityResolution = new IdentityResolutionService(identities, persons);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
-  toolRegistry.register(createToolCatalogTool(toolRegistry));
   toolRegistry.register(createAccountStatusTool(integrations));
   toolRegistry.register(createRuntimePreferenceStatusTool(personPreferences));
   toolRegistry.register(createSetProgressVisibilityTool(personPreferences));

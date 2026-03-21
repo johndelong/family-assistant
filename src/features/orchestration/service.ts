@@ -146,18 +146,21 @@ export class OrchestrationService {
         sessionContext,
         onProgress: input.onProgress
       });
+      const finalText = shouldRequireToolBackedCompletion(rawText, response.usedTools)
+        ? "I wasn't able to verify that action through tools yet, so I don't want to claim it completed. Please try again, or ask me to check the current state first."
+        : response.text;
 
       if (sessionContext) {
         await this.sessionService?.recordTurn({
           sessionId: sessionContext.session.id,
           userMessage: input.message.text,
-          assistantMessage: response.text
+          assistantMessage: finalText
         });
       }
 
       return {
         route: "llm_response",
-        content: response.text,
+        content: finalText,
         model: response.model,
         trace: {
           usedTools: response.usedTools,
@@ -175,6 +178,46 @@ export class OrchestrationService {
       content: `I recognized you as ${input.person.name} and received your message: "${input.message.text}". Tool routing and LLM orchestration are the next layer to add.`
     };
   }
+}
+
+function shouldRequireToolBackedCompletion(messageText: string, usedTools: string[]): boolean {
+  if (usedTools.length > 0) {
+    return false;
+  }
+
+  const normalized = messageText.trim().toLowerCase();
+
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  const actionPhrases = [
+    "turn on",
+    "turn off",
+    "switch on",
+    "switch off",
+    "set ",
+    "dim ",
+    "brighten",
+    "open ",
+    "close ",
+    "lock ",
+    "unlock ",
+    "send ",
+    "email ",
+    "text ",
+    "broadcast",
+    "announce",
+    "create ",
+    "schedule ",
+    "cancel ",
+    "delete ",
+    "remove ",
+    "start ",
+    "stop "
+  ];
+
+  return actionPhrases.some((phrase) => normalized.includes(phrase));
 }
 
 function parseRememberDirective(text: string): { content: string; scope: "private" | "shared" } | null {
