@@ -1,66 +1,28 @@
-import { readdirSync } from "node:fs";
-import { resolve } from "node:path";
 import type { Tool } from "../../core/tools.js";
+import type { ExtensionManifest, ExtensionRegistry, SkillExecutionGuard } from "../extensions/registry.js";
 import type { SessionContext } from "../sessions/service.js";
-import { readSkillBody, readSkillManifest } from "./prompt-fragments.js";
 import type { ToolSelectionTraceEntry } from "./tool-selection.js";
-
-interface SkillManifest {
-  name: string;
-  toolMatchers?: {
-    idSuffixes?: string[];
-    idPatterns?: string[];
-  };
-  activation?: {
-    messageAll?: string[];
-    messageAny?: string[];
-  };
-  forceIncludeMatchingTools?: boolean;
-  directAction?: {
-    runtime: string;
-  };
-  executionGuards?: SkillExecutionGuard[];
-}
-
-interface SkillExecutionGuard {
-  toolIdSuffix?: string;
-  toolIdPattern?: string;
-  dropFields?: Array<{
-    field: string;
-    whenValueEquals?: string | number | boolean;
-    unlessMessageMatches?: string;
-  }>;
-}
 
 export function applyToolSkills(input: {
   messageText: string;
-  requestMode?: "default" | "direct_action";
   sessionContext?: SessionContext | undefined;
   allTools: Tool<unknown, unknown>[];
   selectedTools: Tool<unknown, unknown>[];
   trace: ToolSelectionTraceEntry[];
+  extensionRegistry: ExtensionRegistry;
 }): {
   selectedTools: Tool<unknown, unknown>[];
   systemPromptSections: string[];
   trace: ToolSelectionTraceEntry[];
   executionGuards: SkillExecutionGuard[];
-  directActionShortcut?: {
-    skillName: string;
-    toolIds: string[];
-  };
 } {
   let selectedTools = input.selectedTools;
   let trace = input.trace;
   const systemPromptSections: string[] = [];
   const executionGuards: SkillExecutionGuard[] = [];
-  let directActionShortcut:
-    | {
-        skillName: string;
-        toolIds: string[];
-      }
-    | undefined;
 
-  for (const manifest of listSkillManifests()) {
+  for (const extension of input.extensionRegistry.list()) {
+    const manifest = extension.manifest;
     const matchingTools = input.allTools.filter((tool) => matchesToolManifest(tool.id, manifest));
     if (matchingTools.length === 0) {
       continue;
@@ -75,20 +37,10 @@ export function applyToolSkills(input: {
       trace = mergeTrace(trace, matchingTools.map((tool) => tool.id));
     }
 
-    if (
-      input.requestMode === "direct_action" &&
-      !directActionShortcut &&
-      manifest.directAction?.runtime === "llm_shortcut"
-    ) {
-      selectedTools = dedupeById(matchingTools);
-      trace = mergeTrace(trace, matchingTools.map((tool) => tool.id));
-      directActionShortcut = {
-        skillName: manifest.name,
-        toolIds: matchingTools.map((tool) => tool.id)
-      };
+    const skillBody = input.extensionRegistry.getSkillBody(manifest.name);
+    if (skillBody) {
+      systemPromptSections.push(skillBody);
     }
-
-    systemPromptSections.push(readSkillBody(manifest.name));
     executionGuards.push(...(manifest.executionGuards ?? []));
   }
 
@@ -96,8 +48,7 @@ export function applyToolSkills(input: {
     selectedTools,
     systemPromptSections,
     trace,
-    executionGuards,
-    ...(directActionShortcut ? { directActionShortcut } : {})
+    executionGuards
   };
 }
 
@@ -147,7 +98,7 @@ export function applySkillExecutionGuards(input: {
 function shouldActivateSkill(
   messageText: string,
   sessionContext: SessionContext | undefined,
-  manifest: SkillManifest
+  manifest: ExtensionManifest
 ): boolean {
   if (!manifest.activation) {
     return true;
@@ -165,37 +116,14 @@ function shouldActivateSkill(
     return false;
   }
 
-  if (messageAny.length > 0 && !messageAny.some((pattern) => new RegExp(pattern, "i").test(combined))) {
+  if (messageAny.length > 0 && !messageAny.some((pattern: string) => new RegExp(pattern, "i").test(combined))) {
     return false;
   }
 
   return true;
 }
 
-function listSkillManifests(): SkillManifest[] {
-  const skillsDir = resolve(process.cwd(), "skills");
-  const entries = readdirSync(skillsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-
-  const manifests: SkillManifest[] = [];
-
-  for (const entry of entries) {
-    try {
-      const manifest = JSON.parse(readSkillManifest(entry)) as SkillManifest;
-      if (manifest?.name) {
-        manifests.push(manifest);
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return manifests;
-}
-
-function matchesToolManifest(toolId: string, manifest: SkillManifest): boolean {
+function matchesToolManifest(toolId: string, manifest: ExtensionManifest): boolean {
   const suffixes = manifest.toolMatchers?.idSuffixes ?? [];
   const patterns = manifest.toolMatchers?.idPatterns ?? [];
 

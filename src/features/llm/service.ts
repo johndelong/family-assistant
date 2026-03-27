@@ -2,11 +2,10 @@ import type { Person } from "../../core/domain.js";
 import type { InboundMessage } from "../../core/channels.js";
 import type { LlmProvider, LlmToolSelectionTrace, LlmToolTrace } from "./provider.js";
 import type { ToolRegistry } from "../../core/tools.js";
+import type { ExtensionRegistry } from "../extensions/registry.js";
 import type { RetrievedMemory } from "../memory/retrieval-service.js";
 import type { PromptProfileContext } from "../profiles/prompt-profile-service.js";
 import type { SessionContext } from "../sessions/service.js";
-import type { McpPromptService } from "../integrations/mcp-prompt-service.js";
-import type { DirectActionTrace } from "../direct-actions/executor.js";
 import { readPromptFragment } from "./prompt-fragments.js";
 import { selectRelevantTools } from "./tool-selection.js";
 import { applySkillExecutionGuards, applyToolSkills } from "./tool-skills.js";
@@ -14,7 +13,7 @@ import { applySkillExecutionGuards, applyToolSkills } from "./tool-skills.js";
 export class LlmService {
   constructor(
     private readonly provider: LlmProvider,
-    private readonly mcpPromptService?: McpPromptService
+    private readonly extensionRegistry: ExtensionRegistry
   ) {}
 
   async respond(input: {
@@ -70,7 +69,6 @@ export class LlmService {
     usedTools: string[];
     toolTrace: LlmToolTrace[];
     toolSelectionTrace: LlmToolSelectionTrace[];
-    directActionTrace?: DirectActionTrace;
     integrationPrompts?: Array<{
       connectionId: string;
       integrationKey: string;
@@ -108,11 +106,11 @@ export class LlmService {
 
     const skillContext = applyToolSkills({
       messageText: input.message.text,
-      ...(input.requestMode ? { requestMode: input.requestMode } : {}),
       sessionContext: input.sessionContext,
       allTools: conversationTools,
       selectedTools: selection.selectedTools,
-      trace: selection.trace
+      trace: selection.trace,
+      extensionRegistry: this.extensionRegistry
     });
     const integrationPrompts = input.integrationPromptSections
       ? input.integrationPromptSections.map((content) => ({
@@ -121,14 +119,7 @@ export class LlmService {
           promptName: "external",
           content
         }))
-      : (
-      skillContext.directActionShortcut && this.mcpPromptService
-        ? await this.mcpPromptService.buildPromptSections({
-            toolIds: skillContext.directActionShortcut.toolIds,
-            maxPromptsPerConnection: 2
-          })
-        : []
-    );
+      : [];
 
     const tools = skillContext.selectedTools
       .filter((tool) => tool.inputJsonSchema)
@@ -290,11 +281,6 @@ export class LlmService {
             }))
           }
         : {}),
-      ...(skillContext.directActionShortcut
-        ? {
-            directActionTrace: buildDirectActionShortcutTrace(skillContext.directActionShortcut)
-          }
-        : {}),
       timing: {
         llmStartedAt: llmStartedAt.toISOString(),
         llmCompletedAt: llmCompletedAt.toISOString(),
@@ -309,22 +295,6 @@ export class LlmService {
       }
     };
   }
-}
-
-function buildDirectActionShortcutTrace(input: {
-  skillName: string;
-  toolIds: string[];
-}): DirectActionTrace {
-  return {
-    executorId: input.skillName,
-    steps: [
-      {
-        kind: "resolve",
-        success: true,
-        detail: `Narrowed direct-action toolset to ${input.toolIds.length} tool(s).`
-      }
-    ]
-  };
 }
 
 function describeToolWork(toolId: string, description: string): string {

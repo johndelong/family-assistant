@@ -216,6 +216,47 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
   `);
 
   await db.execute(sql`
+    create table if not exists structured_execution_runs (
+      id uuid primary key,
+      request_id uuid,
+      person_id uuid references persons(id),
+      skill_name varchar(200) not null,
+      runtime varchar(64) not null,
+      status varchar(32) not null,
+      message_text text not null,
+      current_step_id varchar(200),
+      state jsonb,
+      resume_token uuid,
+      trace jsonb,
+      result text,
+      created_at timestamptz not null,
+      updated_at timestamptz not null,
+      completed_at timestamptz
+    )
+  `);
+
+  await db.execute(sql`
+    alter table structured_execution_runs
+      add column if not exists current_step_id varchar(200)
+  `);
+
+  await db.execute(sql`
+    alter table structured_execution_runs
+      add column if not exists state jsonb
+  `);
+
+  await db.execute(sql`
+    alter table structured_execution_runs
+      add column if not exists resume_token uuid
+  `);
+
+  await db.execute(sql`
+    create unique index if not exists structured_execution_runs_resume_token_idx
+      on structured_execution_runs(resume_token)
+      where resume_token is not null
+  `);
+
+  await db.execute(sql`
     create table if not exists tool_capabilities (
       capability_name varchar(200) primary key,
       tool_id varchar(200) not null,

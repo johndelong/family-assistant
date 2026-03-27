@@ -1,5 +1,11 @@
 {
   "name": "home-assistant-control",
+  "package": {
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "author": "family-assistant",
+    "tags": ["smart-home", "home-assistant", "mcp"]
+  },
   "toolMatchers": {
     "idSuffixes": [
       ".HassTurnOn",
@@ -21,8 +27,13 @@
     ]
   },
   "forceIncludeMatchingTools": true,
-  "directAction": {
-    "runtime": "llm_shortcut"
+  "structuredExecution": {
+    "runtime": "constrained_tools",
+    "requestModes": [
+      "direct_action"
+    ],
+    "integrationPrompts": "matched_tools",
+    "progressMessage": "Taking action..."
   },
   "executionGuards": [
     {

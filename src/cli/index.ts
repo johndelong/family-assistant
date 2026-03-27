@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { Command, InvalidArgumentError } from "commander";
+import { resolve } from "node:path";
 import { TraceRepository } from "../features/tracing/repository.js";
+import { ExtensionManager } from "../features/extensions/manager.js";
 import { formatAcceptedRequestForUser } from "../features/requests/formatter.js";
 import type { ChannelType, PersonRole } from "../core/domain.js";
 import { createCliContext } from "./context.js";
@@ -659,6 +661,128 @@ function buildProgram(): Command {
 
       for (const grant of grants) {
         console.log(`${grant.toolId}  owner=${grant.ownerId}  grantee=${grant.granteeId}`);
+      }
+    });
+
+  const extension = program.command("extension").description("Inspect loaded extensions");
+
+  extension
+    .command("list")
+    .description("List validated extensions and their runtime capabilities")
+    .action(async () => {
+      const result = await withContext(async (ctx) => ({
+        extensions: ctx.extensionRegistry.inspectAll(),
+        errors: ctx.extensionRegistry.listErrors()
+      }));
+
+      if (result.extensions.length === 0) {
+        console.log("No extensions loaded.");
+      } else {
+        for (const item of result.extensions) {
+          const runtime = item.structuredExecution?.runtime ?? "none";
+          console.log(`${item.name}@${item.package.version}  source=${item.source}  runtime=${runtime}  path=${item.directory}`);
+          if (item.description) {
+            console.log(`  ${item.description}`);
+          }
+        }
+      }
+
+      if (result.errors.length > 0) {
+        console.log("\nLoad errors:");
+        for (const error of result.errors) {
+          console.log(`- ${error.source} ${error.directory}: ${error.error}`);
+        }
+      }
+    });
+
+  extension
+    .command("show")
+    .argument("<name>", "Extension name")
+    .description("Show detailed metadata for a single extension")
+    .action(async (name: string) => {
+      const inspection = await withContext(async (ctx) => ctx.extensionRegistry.inspect(name));
+
+      if (!inspection) {
+        throw new Error(`Extension not found: ${name}`);
+      }
+
+      console.log(JSON.stringify(inspection, null, 2));
+    });
+
+  extension
+    .command("validate")
+    .requiredOption("--from <directory>", "Extension directory to validate")
+    .description("Validate an extension directory against the extension contract")
+    .action(async (options: { from: string }) => {
+      const manager = new ExtensionManager(resolve(config.dataDir, "skills"));
+      const result = await manager.validateDirectory(options.from);
+
+      console.log(`Extension ${result.manifest.name}@${result.manifest.package.version} is valid.`);
+      console.log(`- apiVersion: ${result.manifest.package.apiVersion}`);
+      console.log(`- source: ${result.directory}`);
+      console.log(`- has SKILL.md: ${result.hasSkillBody ? "yes" : "no"}`);
+    });
+
+  extension
+    .command("install")
+    .requiredOption("--from <directory>", "Extension directory to install")
+    .description("Install an extension into the managed extension directory")
+    .action(async (options: { from: string }) => {
+      const manager = new ExtensionManager(resolve(config.dataDir, "skills"));
+      const result = await manager.installFromDirectory({
+        sourceDirectory: options.from
+      });
+
+      console.log(`Installed ${result.manifest.name}@${result.manifest.package.version} to ${result.installedDirectory}`);
+    });
+
+  extension
+    .command("update")
+    .requiredOption("--from <directory>", "Extension directory to update from")
+    .description("Replace an existing managed extension with a new directory")
+    .action(async (options: { from: string }) => {
+      const manager = new ExtensionManager(resolve(config.dataDir, "skills"));
+      const result = await manager.installFromDirectory({
+        sourceDirectory: options.from,
+        replace: true
+      });
+
+      console.log(`Updated ${result.manifest.name}@${result.manifest.package.version} at ${result.installedDirectory}`);
+    });
+
+  extension
+    .command("remove")
+    .argument("<name>", "Extension name")
+    .description("Remove a managed extension")
+    .action(async (name: string) => {
+      const manager = new ExtensionManager(resolve(config.dataDir, "skills"));
+      const removed = await manager.uninstall(name);
+      console.log(`Removed ${name} from ${removed}`);
+    });
+
+  const structuredExecution = program.command("structured-execution").description("Manage structured execution runs");
+
+  structuredExecution
+    .command("respond")
+    .requiredOption("--token <resumeToken>", "Resume token")
+    .option("--approve", "Approve and resume the workflow")
+    .option("--deny", "Deny and resume the workflow")
+    .description("Respond to a workflow approval checkpoint")
+    .action(async (options: { token: string; approve?: boolean; deny?: boolean }) => {
+      if (Boolean(options.approve) === Boolean(options.deny)) {
+        throw new InvalidArgumentError("Choose exactly one of --approve or --deny");
+      }
+
+      const result = await withContext(async (ctx) => {
+        return ctx.orchestration.resumeStructuredExecution({
+          resumeToken: options.token,
+          approved: Boolean(options.approve)
+        });
+      });
+
+      console.log(result.content);
+      if (result.status === "awaiting_approval" && result.resumeToken) {
+        console.log(`New approval token: ${result.resumeToken}`);
       }
     });
 

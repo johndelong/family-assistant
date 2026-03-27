@@ -1,4 +1,5 @@
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { resolve } from "node:path";
 import { createDatabaseClient } from "../db/client.js";
 import { ensureSchema } from "../db/bootstrap.js";
 import { ToolRegistry } from "../core/tools.js";
@@ -10,6 +11,7 @@ import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-to
 import { McpPromptService } from "../features/integrations/mcp-prompt-service.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
 import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
+import { ExtensionRegistry } from "../features/extensions/registry.js";
 import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { PersonRepository } from "../features/persons/repository.js";
@@ -19,6 +21,8 @@ import { RequestIntakeService } from "../features/requests/service.js";
 import { SessionRepository } from "../features/sessions/repository.js";
 import { LlmSessionSummarizer } from "../features/sessions/llm-session-summarizer.js";
 import { SessionService } from "../features/sessions/service.js";
+import { StructuredExecutionRunRepository } from "../features/structured-execution/repository.js";
+import { StructuredExecutionService } from "../features/structured-execution/service.js";
 import { IdentityResolutionService } from "../features/identity/service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
 import { PersonPreferenceRepository } from "../features/preferences/repository.js";
@@ -52,6 +56,9 @@ export interface CliContext {
   profiles: ProfileRepository;
   runtimePreferences: PersonPreferenceRepository;
   requestIntake: RequestIntakeService;
+  orchestration: OrchestrationService;
+  structuredExecutionRuns: StructuredExecutionRunRepository;
+  extensionRegistry: ExtensionRegistry;
 }
 
 export async function createCliContext(config: AppConfig): Promise<CliContext> {
@@ -61,6 +68,11 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
 
   const { db, pool } = createDatabaseClient(config.databaseUrl);
   await ensureSchema(db);
+  const extensionRegistry = new ExtensionRegistry({
+    workspaceDir: resolve(process.cwd(), "skills"),
+    managedDir: resolve(process.cwd(), config.dataDir, "skills"),
+    extraDirs: config.extensionDirs
+  });
 
   const toolRegistry = new ToolRegistry();
   const mcpRuntime = new McpRuntimeManager();
@@ -72,6 +84,9 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   const mcpPromptService = new McpPromptService(integrations, mcpRuntime);
+  const structuredExecutionService = new StructuredExecutionService(extensionRegistry);
+  const structuredExecutionRuns = new StructuredExecutionRunRepository(db);
+  const traceWriter = new TraceWriter(config.dataDir);
   toolRegistry.register(systemHealthTool);
   toolRegistry.register(timeNowTool);
   if (config.braveApiKey) {
@@ -102,7 +117,7 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
         ...(config.openAiDirectActionModel ? { directActionModel: config.openAiDirectActionModel } : {})
       })
     : undefined;
-  const llmService = provider ? new LlmService(provider, mcpPromptService) : undefined;
+  const llmService = provider ? new LlmService(provider, extensionRegistry) : undefined;
   const sessionService = new SessionService(
     sessions,
     provider ? new LlmSessionSummarizer(provider) : undefined
@@ -112,9 +127,13 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
     llmService,
     memoryRetrieval,
     promptProfiles,
-    sessionService
+    sessionService,
+    mcpPromptService,
+    structuredExecutionService,
+    structuredExecutionRuns,
+    persons,
+    traceWriter
   );
-  const traceWriter = new TraceWriter(config.dataDir);
   const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, runtimePreferences);
 
   return {
@@ -127,6 +146,9 @@ export async function createCliContext(config: AppConfig): Promise<CliContext> {
     profiles,
     runtimePreferences,
     requestIntake,
+    orchestration,
+    structuredExecutionRuns,
+    extensionRegistry,
     async close() {
       await mcpRuntime.stopAll();
       await pool.end();

@@ -141,6 +141,24 @@ export const sessionMessages = pgTable("session_messages", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
 });
 
+export const structuredExecutionRuns = pgTable("structured_execution_runs", {
+  id: uuid("id").primaryKey(),
+  requestId: uuid("request_id"),
+  personId: uuid("person_id").references(() => persons.id),
+  skillName: varchar("skill_name", { length: 200 }).notNull(),
+  runtime: varchar("runtime", { length: 64 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  messageText: text("message_text").notNull(),
+  currentStepId: varchar("current_step_id", { length: 200 }),
+  state: jsonb("state"),
+  resumeToken: uuid("resume_token"),
+  trace: jsonb("trace"),
+  result: text("result"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true })
+});
+
 export const toolCapabilities = pgTable("tool_capabilities", {
   capabilityName: varchar("capability_name", { length: 200 }).primaryKey(),
   toolId: varchar("tool_id", { length: 200 }).notNull(),

@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { resolve } from "node:path";
 import type { AppConfig } from "../shared/config.js";
 import { createDatabaseClient } from "../db/client.js";
 import { ensureSchema } from "../db/bootstrap.js";
@@ -12,6 +13,7 @@ import { registerDynamicMcpTools } from "../features/integrations/dynamic-mcp-to
 import { McpPromptService } from "../features/integrations/mcp-prompt-service.js";
 import { IntegrationRepository } from "../features/integrations/repository.js";
 import { McpRuntimeManager } from "../features/mcp/runtime-manager.js";
+import { ExtensionRegistry } from "../features/extensions/registry.js";
 import { MemoryRepository } from "../features/memory/repository.js";
 import { MemoryRetrievalService } from "../features/memory/retrieval-service.js";
 import { OrchestrationService } from "../features/orchestration/service.js";
@@ -23,6 +25,8 @@ import { RequestIntakeService } from "../features/requests/service.js";
 import { SessionRepository } from "../features/sessions/repository.js";
 import { LlmSessionSummarizer } from "../features/sessions/llm-session-summarizer.js";
 import { SessionService } from "../features/sessions/service.js";
+import { StructuredExecutionRunRepository } from "../features/structured-execution/repository.js";
+import { StructuredExecutionService } from "../features/structured-execution/service.js";
 import { TraceWriter } from "../features/tracing/writer.js";
 import { createAccountStatusTool } from "../features/tools/account-status-tool.js";
 import { createMemorySearchTool } from "../features/tools/memory-search-tool.js";
@@ -50,6 +54,7 @@ export interface ServerContext {
   persons?: PersonRepository;
   identities?: IdentityRepository;
   integrations?: IntegrationRepository;
+  extensionRegistry?: ExtensionRegistry;
   identityResolution?: IdentityResolutionService;
   orchestration?: OrchestrationService;
   requestIntake?: RequestIntakeService;
@@ -80,6 +85,11 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
 
   const { db, pool } = createDatabaseClient(config.databaseUrl);
   await ensureSchema(db);
+  const extensionRegistry = new ExtensionRegistry({
+    workspaceDir: resolve(process.cwd(), "skills"),
+    managedDir: resolve(process.cwd(), config.dataDir, "skills"),
+    extraDirs: config.extensionDirs
+  });
 
   const households = new HouseholdRepository(db);
   const persons = new PersonRepository(db);
@@ -92,6 +102,9 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const promptProfiles = new PromptProfileService(profiles);
   const sessions = new SessionRepository(db);
   const mcpPromptService = new McpPromptService(integrations, mcpRuntime);
+  const structuredExecutionService = new StructuredExecutionService(extensionRegistry);
+  const structuredExecutionRuns = new StructuredExecutionRunRepository(db);
+  const traceWriter = new TraceWriter(config.dataDir);
   const identityResolution = new IdentityResolutionService(identities, persons);
   toolRegistry.register(createMemoryStoreTool(memory));
   toolRegistry.register(createMemorySearchTool(memory));
@@ -114,7 +127,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
         ...(config.openAiDirectActionModel ? { directActionModel: config.openAiDirectActionModel } : {})
       })
     : undefined;
-  const llmService = provider ? new LlmService(provider, mcpPromptService) : undefined;
+  const llmService = provider ? new LlmService(provider, extensionRegistry) : undefined;
   const sessionService = new SessionService(
     sessions,
     provider ? new LlmSessionSummarizer(provider) : undefined
@@ -124,9 +137,13 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
     llmService,
     memoryRetrieval,
     promptProfiles,
-    sessionService
+    sessionService,
+    mcpPromptService,
+    structuredExecutionService,
+    structuredExecutionRuns,
+    persons,
+    traceWriter
   );
-  const traceWriter = new TraceWriter(config.dataDir);
   const requestIntake = new RequestIntakeService(identityResolution, orchestration, traceWriter, personPreferences);
 
   return {
@@ -138,6 +155,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
     persons,
     identities,
     integrations,
+    extensionRegistry,
     identityResolution,
     orchestration,
     requestIntake,

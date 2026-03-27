@@ -3,7 +3,7 @@ export interface DirectActionTrace {
   intent?: string;
   target?: Record<string, unknown>;
   steps: Array<{
-    kind: "resolve" | "tool_call" | "verify";
+    kind: "resolve" | "tool_call" | "verify" | "set" | "branch" | "approval" | "respond";
     toolName?: string;
     arguments?: Record<string, unknown>;
     success?: boolean;

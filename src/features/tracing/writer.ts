@@ -4,7 +4,15 @@ import { join } from "node:path";
 export interface TraceEvent {
   timestamp: string;
   requestId: string;
-  stage: "request.received" | "identity.resolved" | "identity.unpaired" | "llm.invoked" | "request.completed";
+  stage:
+    | "request.received"
+    | "identity.resolved"
+    | "identity.unpaired"
+    | "llm.invoked"
+    | "request.completed"
+    | "structured_execution.paused"
+    | "structured_execution.resumed"
+    | "structured_execution.completed";
   payload: Record<string, unknown>;
 }
 

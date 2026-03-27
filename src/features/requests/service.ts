@@ -15,6 +15,15 @@ export type AcceptedRequest =
       model?: string;
     }
   | {
+      status: "awaiting_approval";
+      requestId: string;
+      person: Person;
+      route: "tool_execution";
+      message: string;
+      runId: string;
+      resumeToken: string;
+    }
+  | {
       status: "unpaired";
       requestId: string;
       pairingCode: string;
@@ -88,8 +97,9 @@ export class RequestIntakeService {
           profileContext: summarizeProfileContext(response.trace?.profileContext),
           sessionContext: summarizeSessionContext(response.trace?.sessionContext)
         } : {
-          outcome: "completed",
+          outcome: response.awaitingApproval ? "awaiting_approval" : "completed",
           route: response.route,
+          ...(response.awaitingApproval ? { awaitingApproval: response.awaitingApproval } : {}),
           ...(response.trace?.directAction ? { directAction: summarizeDirectActionTrace(response.trace.directAction) } : {})
         }
       });
@@ -105,6 +115,18 @@ export class RequestIntakeService {
             model: response.model
           }
         });
+      }
+
+      if (response.awaitingApproval) {
+        return {
+          status: "awaiting_approval",
+          requestId: input.requestId,
+          person: resolution.person,
+          route: "tool_execution",
+          message: response.content,
+          runId: response.awaitingApproval.runId,
+          resumeToken: response.awaitingApproval.resumeToken
+        };
       }
 
       return {
@@ -297,7 +319,7 @@ function summarizeDirectActionTrace(trace: {
   intent?: string;
   target?: Record<string, unknown>;
   steps: Array<{
-    kind: "resolve" | "tool_call" | "verify";
+    kind: "resolve" | "tool_call" | "verify" | "set" | "branch" | "approval" | "respond";
     toolName?: string;
     arguments?: Record<string, unknown>;
     success?: boolean;
@@ -309,7 +331,7 @@ function summarizeDirectActionTrace(trace: {
   intent?: string;
   target?: Record<string, unknown>;
   steps: Array<{
-    kind: "resolve" | "tool_call" | "verify";
+    kind: "resolve" | "tool_call" | "verify" | "set" | "branch" | "approval" | "respond";
     toolName?: string;
     arguments?: Record<string, unknown>;
     success?: boolean;

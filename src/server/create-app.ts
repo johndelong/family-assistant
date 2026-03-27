@@ -151,9 +151,9 @@ export function createApp({ context }: CreateAppOptions) {
       }
     });
 
-    if (outcome.status === "completed") {
+    if (outcome.status === "completed" || outcome.status === "awaiting_approval") {
       return reply.code(202).send({
-        status: "completed",
+        status: outcome.status,
         requestId: outcome.requestId,
         route: outcome.route,
         person: {
@@ -162,7 +162,15 @@ export function createApp({ context }: CreateAppOptions) {
           name: outcome.person.name,
           role: outcome.person.role
         },
-        message: outcome.message
+        message: outcome.message,
+        ...(outcome.status === "awaiting_approval"
+          ? {
+              awaitingApproval: {
+                runId: outcome.runId,
+                resumeToken: outcome.resumeToken
+              }
+            }
+          : {})
       });
     }
 
@@ -287,6 +295,51 @@ export function createApp({ context }: CreateAppOptions) {
       toolName: params.toolName,
       result
     };
+  });
+
+  app.get("/admin/extensions", async () => {
+    const registry = app.serverContext.extensionRegistry;
+    return {
+      extensions: registry?.inspectAll() ?? [],
+      loadErrors: registry?.listErrors() ?? []
+    };
+  });
+
+  app.get("/admin/extensions/:name", async (request, reply) => {
+    const params = z.object({
+      name: z.string().min(1)
+    }).parse(request.params);
+    const inspection = app.serverContext.extensionRegistry?.inspect(params.name);
+
+    if (!inspection) {
+      return reply.code(404).send({
+        error: `Extension not found: ${params.name}`
+      });
+    }
+
+    return inspection;
+  });
+
+  app.post("/admin/structured-execution/:resumeToken/respond", async (request, reply) => {
+    if (!app.serverContext.orchestration) {
+      return reply.code(503).send({
+        error: "DATABASE_URL is required to resume structured execution runs"
+      });
+    }
+
+    const params = z.object({
+      resumeToken: z.uuid()
+    }).parse(request.params);
+    const body = z.object({
+      approved: z.boolean()
+    }).parse(request.body);
+
+    const result = await app.serverContext.orchestration.resumeStructuredExecution({
+      resumeToken: params.resumeToken,
+      approved: body.approved
+    });
+
+    return result;
   });
 
   return app;
