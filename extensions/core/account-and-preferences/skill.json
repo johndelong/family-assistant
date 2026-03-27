@@ -1,0 +1,12 @@
+{
+  "name": "account-and-preferences",
+  "package": {
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "author": "family-assistant",
+    "tags": ["accounts", "preferences", "settings"]
+  },
+  "toolRuntime": {
+    "module": "runtime.ts"
+  }
+}

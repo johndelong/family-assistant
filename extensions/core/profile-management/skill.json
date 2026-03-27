@@ -1,0 +1,12 @@
+{
+  "name": "profile-management",
+  "package": {
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "author": "family-assistant",
+    "tags": ["profiles", "admin", "identity"]
+  },
+  "toolRuntime": {
+    "module": "runtime.ts"
+  }
+}

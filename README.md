@@ -12,6 +12,13 @@ Build a modular TypeScript-based household assistant platform that supports mult
 - **Explicit over Hidden**: Favor deterministic, traceable code over framework magic
 - **Local-First**: Use exports and JSONL traces for portability and debugging without creating a second config authority
 
+## Repo Layout
+
+- `frontend/` - the thin admin/operator UI that talks to the runtime API
+- `runtime/` - the runtime, API, CLI, orchestration, permissions, and automation engine
+- `extensions/core/` - preinstalled platform extensions that ship with the runtime
+- `extensions/packages/` - package-style extensions for integrations and capability packs
+
 ## Quick Architecture
 
 The platform uses a modular architecture within a single Node.js process in v1:
@@ -88,9 +95,21 @@ The platform uses a modular architecture within a single Node.js process in v1:
 ### Installation
 
 ```bash
-npm install
-npm run typecheck
-npm run start
+pnpm install
+pnpm typecheck
+pnpm runtime:dev
+```
+
+For the thin admin UI:
+
+```bash
+pnpm frontend:dev
+```
+
+If you run the frontend separately in development, make sure the runtime allows its origin:
+
+```bash
+FRONTEND_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
 ## Documentation

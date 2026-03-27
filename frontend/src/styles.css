@@ -1,0 +1,70 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(0, 128, 96, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(215, 148, 84, 0.18), transparent 22%),
+    linear-gradient(180deg, #fbf8f2 0%, #f2ede3 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.mantine-AppShell-main {
+  background: transparent;
+}
+
+.mantine-AppShell-navbar {
+  background: rgba(250, 248, 242, 0.88);
+  backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(28, 42, 34, 0.08);
+}
+
+.sessionCard {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.86), rgba(241, 247, 243, 0.88));
+}
+
+.sessionIcon {
+  flex: 0 0 auto;
+}
+
+.sessionIconLive {
+  color: #0f8a63;
+}
+
+.sessionIconIdle {
+  color: #718078;
+}
+
+.traceItem {
+  cursor: pointer;
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.traceItem:hover {
+  transform: translateY(-1px);
+  background: rgba(0, 128, 96, 0.06);
+}
+
+.traceItemActive {
+  background: rgba(0, 128, 96, 0.12);
+  border: 1px solid rgba(0, 128, 96, 0.2);
+}
+
+.tracePre {
+  margin: 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: #18211d;
+  color: #eef8f0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

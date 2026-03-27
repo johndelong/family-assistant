@@ -1,0 +1,171 @@
+import { z } from "../../../runtime/src/core/zod.js";
+import type { Tool } from "../../../runtime/src/core/tools.js";
+import type { ProfileRepository } from "../../../runtime/src/features/profiles/repository.js";
+
+interface ProfileUpdateResult {
+  scope: "assistant" | "assistant_identity" | "household" | "person";
+  updatedAt: string;
+}
+
+type ProfileUpdateInput = {
+  instructions: string;
+};
+
+const profileUpdateSchema = z.object({
+  instructions: z.string().min(1)
+});
+
+const profileUpdateJsonSchema = {
+  type: "object",
+  properties: {
+    instructions: {
+      type: "string",
+      description: "A concise canonical description of the preferences or style to persist"
+    }
+  },
+  required: ["instructions"],
+  additionalProperties: false
+} satisfies Record<string, unknown>;
+
+export function createPersonProfileSetTool(profiles: ProfileRepository): Tool<ProfileUpdateInput, ProfileUpdateResult> {
+  return {
+    id: "profile.set_person_preferences",
+    description: "Persist concise preferences for the current person after they explicitly state or confirm them",
+    inputSchema: profileUpdateSchema,
+    inputJsonSchema: profileUpdateJsonSchema,
+    requiredCapabilities: [],
+    exposure: "conversation",
+    approvalPolicy: "never",
+    targetScope: "self",
+    async execute(input, context): Promise<ProfileUpdateResult> {
+      if (!context.person) {
+        throw new Error("A resolved person is required to update person preferences");
+      }
+
+      const record = await profiles.setPersonProfile(context.person.id, input.instructions.trim());
+      return {
+        scope: "person",
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+  };
+}
+
+export function createHouseholdProfileSetTool(profiles: ProfileRepository): Tool<ProfileUpdateInput, ProfileUpdateResult> {
+  return {
+    id: "profile.set_household_preferences",
+    description: "Persist household-wide preferences or norms after an admin clearly states or confirms they apply to the family",
+    inputSchema: profileUpdateSchema,
+    inputJsonSchema: profileUpdateJsonSchema,
+    requiredCapabilities: [],
+    exposure: "conversation",
+    approvalPolicy: "admin_only",
+    targetScope: "household",
+    async execute(input, context): Promise<ProfileUpdateResult> {
+      if (!context.person) {
+        throw new Error("A resolved person is required to update household preferences");
+      }
+
+      if (context.person.role !== "admin") {
+        throw new Error("Only an admin can update household preferences");
+      }
+
+      const record = await profiles.setHouseholdProfile(context.person.householdId, input.instructions.trim());
+      return {
+        scope: "household",
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+  };
+}
+
+export function createAssistantProfileSetTool(profiles: ProfileRepository): Tool<ProfileUpdateInput, ProfileUpdateResult> {
+  return {
+    id: "profile.set_assistant_style",
+    description: "Update the assistant's overall style and personality when an admin explicitly requests a change",
+    inputSchema: profileUpdateSchema,
+    inputJsonSchema: profileUpdateJsonSchema,
+    requiredCapabilities: [],
+    exposure: "conversation",
+    approvalPolicy: "admin_only",
+    targetScope: "system",
+    async execute(input, context): Promise<ProfileUpdateResult> {
+      if (!context.person) {
+        throw new Error("A resolved person is required to update assistant style");
+      }
+
+      if (context.person.role !== "admin") {
+        throw new Error("Only an admin can update assistant style");
+      }
+
+      const record = await profiles.setAssistantProfile(input.instructions.trim());
+      return {
+        scope: "assistant",
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+  };
+}
+
+const assistantIdentityUpdateSchema = z.object({
+  name: z.string().min(1),
+  roleDescription: z.string().min(1),
+  signatureName: z.string().min(1).optional()
+});
+
+type AssistantIdentityUpdateInput = z.infer<typeof assistantIdentityUpdateSchema>;
+
+const assistantIdentityUpdateJsonSchema = {
+  type: "object",
+  properties: {
+    name: {
+      type: "string",
+      description: "The assistant's conversational name"
+    },
+    roleDescription: {
+      type: "string",
+      description: "A concise role description that explains what the assistant is"
+    },
+    signatureName: {
+      type: "string",
+      description: "Optional signature name to use in outbound messages"
+    }
+  },
+  required: ["name", "roleDescription"],
+  additionalProperties: false
+} satisfies Record<string, unknown>;
+
+export function createAssistantIdentitySetTool(
+  profiles: ProfileRepository
+): Tool<AssistantIdentityUpdateInput, ProfileUpdateResult> {
+  return {
+    id: "profile.set_assistant_identity",
+    description: "Update the assistant's name and identity framing when an admin explicitly requests a change",
+    inputSchema: assistantIdentityUpdateSchema,
+    inputJsonSchema: assistantIdentityUpdateJsonSchema,
+    requiredCapabilities: [],
+    exposure: "conversation",
+    approvalPolicy: "admin_only",
+    targetScope: "system",
+    async execute(input, context): Promise<ProfileUpdateResult> {
+      if (!context.person) {
+        throw new Error("A resolved person is required to update assistant identity");
+      }
+
+      if (context.person.role !== "admin") {
+        throw new Error("Only an admin can update assistant identity");
+      }
+
+      const record = await profiles.setAssistantIdentity({
+        name: input.name,
+        roleDescription: input.roleDescription,
+        ...(input.signatureName ? { signatureName: input.signatureName } : {})
+      });
+
+      return {
+        scope: "assistant_identity",
+        updatedAt: record.updatedAt.toISOString()
+      };
+    }
+  };
+}

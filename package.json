@@ -1,37 +1,16 @@
 {
-  "name": "family-assistant",
-  "version": "0.1.0",
+  "name": "family-assistant-workspace",
   "private": true,
-  "description": "CLI-first modular household assistant platform",
   "packageManager": "pnpm@10.11.0",
-  "type": "module",
-  "bin": {
-    "family-assistant": "./dist/cli/index.js"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "node --watch --import tsx src/main.ts",
-    "start": "node --import tsx src/main.ts",
-    "cli": "node --import tsx src/cli/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "commander": "^14.0.0",
-    "dotenv": "^17.2.1",
-    "drizzle-orm": "^0.44.4",
-    "fastify": "^5.6.0",
-    "grammy": "^1.41.1",
-    "openai": "^6.32.0",
-    "pg": "^8.16.3",
-    "pino": "^9.9.0",
-    "zod": "^4.1.5"
-  },
-  "devDependencies": {
-    "@types/node": "^24.3.0",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "build": "pnpm --filter @family-assistant/runtime build && pnpm --filter @family-assistant/frontend build",
+    "dev": "pnpm runtime:dev",
+    "runtime:dev": "pnpm --filter @family-assistant/runtime dev",
+    "frontend:dev": "pnpm --filter @family-assistant/frontend dev",
+    "frontend:build": "pnpm --filter @family-assistant/frontend build",
+    "frontend:start": "pnpm --filter @family-assistant/frontend start",
+    "start": "pnpm --filter @family-assistant/runtime start",
+    "cli": "pnpm --filter @family-assistant/runtime cli",
+    "typecheck": "pnpm --filter @family-assistant/runtime typecheck && pnpm --filter @family-assistant/frontend typecheck && pnpm --filter @family-assistant/runtime exec tsc --noEmit -p ../tsconfig.extensions.json"
   }
 }

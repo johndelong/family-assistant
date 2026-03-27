@@ -1,0 +1,12 @@
+{
+  "name": "extension-management",
+  "package": {
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "author": "family-assistant",
+    "tags": ["core", "extensions", "packages", "admin"]
+  },
+  "toolRuntime": {
+    "module": "runtime.ts"
+  }
+}

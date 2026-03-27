@@ -1,0 +1,12 @@
+{
+  "name": "core-utility-tools",
+  "package": {
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "author": "family-assistant",
+    "tags": ["core", "utility", "time", "web-search"]
+  },
+  "toolRuntime": {
+    "module": "runtime.ts"
+  }
+}
