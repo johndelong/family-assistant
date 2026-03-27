@@ -54,13 +54,10 @@ Extensions with an unsupported `package.apiVersion` are rejected at load time.
 - LLM skill prompting and execution guards consume the same validated registry
 - tool runtime registration can be driven from the same registry
 - structured execution/workflows consume that same registry
-- admin and CLI inspection surfaces read from the registry rather than rescanning the filesystem
+- admin inspection surfaces read from the registry rather than rescanning the filesystem
 
 ## Inspection
 
-- CLI: `family-assistant extension list`
-- CLI detail: `family-assistant extension show <name>`
-- CLI validate: `family-assistant extension validate --from /path/to/extension`
 - Admin API: `GET /admin/extensions`
 - Admin API detail: `GET /admin/extensions/:name`
 
@@ -70,7 +67,6 @@ Installed extensions live under `<DATA_DIR>/extensions`.
 
 Package workspace scaffolds can be created under `<DATA_DIR>/packages`.
 
-- Install: `family-assistant extension install --from /path/to/extension`
-- Update: `family-assistant extension update --from /path/to/extension`
-- Remove: `family-assistant extension remove <name>`
-- Create package scaffold: `family-assistant extension package-create --name ... --description ...`
+- Install: `POST /admin/extensions/install`
+- Remove: `DELETE /admin/extensions/:name`
+- Create package scaffold: `POST /admin/extensions/package-scaffold`

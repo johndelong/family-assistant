@@ -7,7 +7,7 @@ Build a modular TypeScript-based household assistant platform that supports mult
 ## Core Philosophy
 
 - **Lean Core + Clear Boundaries**: Keep the orchestrator small and the module seams explicit
-- **CLI-First**: Use the CLI as the primary management surface in v1
+- **UI + API First**: Use the admin frontend and runtime API as the primary management surface
 - **Database as Source of Truth**: Persist authoritative state in PostgreSQL
 - **Explicit over Hidden**: Favor deterministic, traceable code over framework magic
 - **Local-First**: Use exports and JSONL traces for portability and debugging without creating a second config authority
@@ -15,7 +15,7 @@ Build a modular TypeScript-based household assistant platform that supports mult
 ## Repo Layout
 
 - `frontend/` - the thin admin/operator UI that talks to the runtime API
-- `runtime/` - the runtime, API, CLI, orchestration, permissions, and automation engine
+- `runtime/` - the runtime, API, orchestration, permissions, and automation engine
 - `extensions/core/` - preinstalled platform extensions that ship with the runtime
 - `extensions/packages/` - package-style extensions for integrations and capability packs
 
@@ -28,7 +28,7 @@ The platform uses a modular architecture within a single Node.js process in v1:
 3. **Orchestrator** - Coordinates tools, integrations, and LLM providers
 4. **Memory** - PostgreSQL for durable state and JSONL for traces/replay
 5. **Integration Layer** - Person-scoped external connections behind a shared driver interface
-6. **CLI/Admin Surface** - Primary setup and management entry point
+6. **Admin Surface** - Frontend and API for setup, monitoring, and management
 
 ## Primary Goals
 
@@ -41,7 +41,7 @@ The platform uses a modular architecture within a single Node.js process in v1:
 - Lean core with a single tool runtime model
 - Make logging, traceability, and troubleshooting first-class concerns from the start
 - Secure secrets and credentials management
-- CLI-first, UI-later approach for faster v1 delivery
+- API-first runtime with a separate admin UI
 
 ## Design Principles
 
@@ -56,7 +56,7 @@ The platform uses a modular architecture within a single Node.js process in v1:
 - Observable by default
 - Traceable and visualizable
 - Secure by default
-- CLI-first, UI-later
+- API-driven with a separate frontend
 
 ## What's In v1 / Not In v1
 
@@ -73,7 +73,7 @@ The platform uses a modular architecture within a single Node.js process in v1:
 - WebSocket channel first, with Telegram as a strong late-v1 candidate
 - Multiple LLM providers with fallback
 - Person-scoped integration connections
-- CLI-first management and diagnostics
+- Admin UI and API-based management
 - Secure secret handling with encrypted-at-rest credentials
 
 ### Not required for the first solid v1
@@ -81,7 +81,6 @@ The platform uses a modular architecture within a single Node.js process in v1:
 - Plugin marketplace
 - Long-lived per-person MCP server fleets
 - Full automation engine
-- Admin UI
 - Voice I/O
 - Horizontal scaling
 
@@ -119,7 +118,6 @@ FRONTEND_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 - **[SECURITY_MODEL.md](./docs/SECURITY_MODEL.md)** - Identity, pairing, core policy, capabilities, encryption
 - **[IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md)** - Development phases, dependencies, roadmap
 - **[PATTERNS.md](./docs/PATTERNS.md)** - Implementation patterns for tools, capabilities, and extensions
-- **[CLI_DESIGN.md](./docs/CLI_DESIGN.md)** - Complete command reference and configuration guide
 
 ## Contributing
 

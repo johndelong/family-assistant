@@ -10,7 +10,6 @@
     "frontend:build": "pnpm --filter @family-assistant/frontend build",
     "frontend:start": "pnpm --filter @family-assistant/frontend start",
     "start": "pnpm --filter @family-assistant/runtime start",
-    "cli": "pnpm --filter @family-assistant/runtime cli",
     "typecheck": "pnpm --filter @family-assistant/runtime typecheck && pnpm --filter @family-assistant/frontend typecheck && pnpm --filter @family-assistant/runtime exec tsc --noEmit -p ../tsconfig.extensions.json"
   }
 }

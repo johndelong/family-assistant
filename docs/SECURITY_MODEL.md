@@ -32,15 +32,8 @@ Unknown identities are blocked by default.
 1. Unknown identity sends a message
 2. System generates a 6-digit code
 3. Code expires in 15 minutes
-4. Admin pairs it through the CLI
+4. Admin pairs it through the management surface
 5. Future messages resolve directly to the linked person
-
-**CLI Commands:**
-```bash
-family-assistant identity pending
-family-assistant identity pair --code ABC123 --person john
-family-assistant identity revoke --identity-id <id>
-```
 
 **Rate Limits:**
 - Max 3 failed attempts per code
@@ -246,7 +239,7 @@ All logs and traces must redact:
 ### Important Rule
 
 Users should not paste raw secrets into normal conversation flows. Secret capture should happen via:
-- CLI entry
+- admin UI or API entry
 - dedicated secure setup flow
 - integration OAuth handoff
 

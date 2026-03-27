@@ -6,7 +6,7 @@ The Family Assistant Platform is a modular TypeScript household assistant for mu
 
 **Core Philosophy:**
 - **Lean Core + Clear Boundaries**: A small orchestrator with explicit module seams
-- **CLI-First**: The CLI is the primary control surface in v1
+- **UI + API First**: The admin frontend and runtime API are the primary control surface
 - **Database as Source of Truth**: PostgreSQL stores authoritative configuration and state
 - **Explicit over Hidden**: Deterministic policy and tool execution over framework magic
 - **Local-First**: File exports and JSONL traces support debugging and portability without becoming a second config authority
@@ -57,12 +57,11 @@ External system access:
 - Exposes integration-backed tools through the shared tool registry
 - Defers transport details such as native SDK, REST, or future MCP drivers
 
-### 6. CLI and Admin Surface
-Primary v1 interface:
-- Creates households and people
-- Manages identities, grants, providers, and integrations
-- Exports/imports database-backed configuration snapshots
-- Runs diagnostics and health checks
+### 6. Admin Surface
+Primary management interface:
+- Admin frontend for settings, extensions, cron jobs, monitoring, and household management
+- Runtime API for management, configuration, and automation control
+- Observable system state through traces, monitor events, and inspection endpoints
 
 ## Request Flow
 

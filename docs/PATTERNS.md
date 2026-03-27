@@ -177,7 +177,7 @@ async function requireApprovalIfNeeded(tool: Tool<any, any>, input: any, context
 Do not accept raw secrets through standard conversation handlers.
 
 Preferred approaches:
-- CLI entry
+- admin UI or API entry
 - OAuth/browser handoff
 - dedicated secure submission flow that bypasses ordinary transcript logging
 

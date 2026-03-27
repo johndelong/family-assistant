@@ -8,7 +8,7 @@ This implementation follows an incremental, v1-first plan. The goal is to build 
 - **Ship vertical slices**: Each phase should produce something testable
 - **Keep the core small**: Add mechanisms only when they solve a real v1 problem
 - **Prefer consistency over optionality**: One clear model beats three overlapping ones
-- **CLI-first administration**: The CLI is the primary management surface in v1
+- **Admin UI + API**: Management should flow through the frontend and runtime API
 - **Database-backed state**: PostgreSQL is the source of truth
 - **Trace everything important**: JSONL for replay and debugging, not config
 
@@ -16,7 +16,7 @@ This implementation follows an incremental, v1-first plan. The goal is to build 
 
 ```text
 Phase 1: Foundation
-  Core models, database schema, logging, secrets service, CLI skeleton
+  Core models, database schema, logging, secrets service, admin API skeleton
 
 Phase 2: Identity and Core Policy
   Identity resolution, pairing, core permissions, approval framework
@@ -57,7 +57,7 @@ Phase 10: Hardening and Expansion
 
 ## Phase 1: Foundation
 
-**Goal**: Establish repository structure, core domain models, persistence, logging, and CLI scaffolding.
+**Goal**: Establish repository structure, core domain models, persistence, logging, and admin API scaffolding.
 
 **Key Deliverables:**
 - Clean TypeScript module layout
@@ -66,8 +66,7 @@ Phase 10: Hardening and Expansion
 - Secrets service with encryption at rest
 - Structured logging with pino
 - JSONL trace writer for request execution
-- CLI scaffolding with Commander.js
-- Basic admin commands for household and person management
+- Admin API scaffolding for household and person management
 - Resource limit configuration
 
 **Scope Boundaries:**
@@ -88,7 +87,7 @@ Phase 10: Hardening and Expansion
 - Fixed core policy model for platform actions
 - Role defaults for `admin`, `member`, `limited`
 - Approval service for sensitive operations
-- CLI commands for identities and grants
+- Admin API support for identities and grants
 
 **Important Rule:**
 This phase defines **core policy only**. Dynamic tool capabilities come later and do not replace the core policy layer.
@@ -175,7 +174,7 @@ v1 has one runtime tool concept. We do not introduce separate plugin, manifest, 
 - Streaming output over WebSocket
 
 **Scope Boundaries:**
-- Provider configuration is primarily CLI-driven in v1
+- Provider configuration is managed through admin APIs in v1
 - No secret submission through ordinary conversation transcripts
 
 ---
@@ -191,7 +190,7 @@ v1 has one runtime tool concept. We do not introduce separate plugin, manifest, 
 - 1-2 initial integration drivers using native SDK or REST
 - Integration-backed tools exposed through the same registry
 - Health checks and degraded-mode behavior
-- CLI commands for connect, disconnect, list, and test
+- Admin API support for connect, disconnect, list, and test
 
 **Examples:**
 - Google Calendar
