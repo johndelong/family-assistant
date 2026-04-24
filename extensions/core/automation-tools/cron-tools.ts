@@ -8,8 +8,9 @@ const cronCreateSchema = z.object({
   name: z.string().min(1),
   schedule: z.string().min(1),
   timezone: z.string().min(1).default(Intl.DateTimeFormat().resolvedOptions().timeZone),
-  mode: z.enum(["isolated", "main"]).default("isolated"),
-  targetType: z.enum(["prompt", "workflow"]).default("prompt"),
+  sessionTarget: z.enum(["isolated", "main"]).default("isolated"),
+  deliveryType: z.enum(["none", "telegram"]).default("none"),
+  payloadKind: z.enum(["agent_turn", "workflow"]).default("agent_turn"),
   prompt: z.string().optional(),
   workflowSkillName: z.string().optional(),
   workflowMessageText: z.string().optional()
@@ -21,6 +22,11 @@ const cronJobActionSchema = z.object({
   jobId: z.string().uuid()
 });
 
+const cronRunsSchema = z.object({
+  jobId: z.string().uuid().optional(),
+  limit: z.number().int().positive().max(50).default(10)
+});
+
 export function createCronCreateTool(cron: CronService, extensions: ExtensionRegistry): Tool<z.infer<typeof cronCreateSchema>, {
   jobId: string;
   name: string;
@@ -28,7 +34,7 @@ export function createCronCreateTool(cron: CronService, extensions: ExtensionReg
 }> {
   return {
     id: "cron.create",
-    description: "Create a recurring cron job for the current person. Use prompt targets for general recurring tasks or workflow targets for deterministic extension workflows.",
+    description: "Create a recurring cron job for the current person. Choose a sessionTarget of isolated or main, a payloadKind of agent_turn or workflow, and a delivery type. If deliveryType is telegram, the job will send results to the current person's linked Telegram identity automatically.",
     inputSchema: cronCreateSchema,
     inputJsonSchema: {
       type: "object",
@@ -36,8 +42,9 @@ export function createCronCreateTool(cron: CronService, extensions: ExtensionReg
         name: { type: "string" },
         schedule: { type: "string" },
         timezone: { type: "string" },
-        mode: { type: "string", enum: ["isolated", "main"] },
-        targetType: { type: "string", enum: ["prompt", "workflow"] },
+        sessionTarget: { type: "string", enum: ["isolated", "main"] },
+        deliveryType: { type: "string", enum: ["none", "telegram"] },
+        payloadKind: { type: "string", enum: ["agent_turn", "workflow"] },
         prompt: { type: "string" },
         workflowSkillName: { type: "string" },
         workflowMessageText: { type: "string" }
@@ -53,16 +60,17 @@ export function createCronCreateTool(cron: CronService, extensions: ExtensionReg
         throw new Error("A resolved person is required to create a cron job.");
       }
 
-      const target = input.targetType === "workflow"
-        ? buildWorkflowTarget(input, extensions)
-        : buildPromptTarget(input);
+      const payload = input.payloadKind === "workflow"
+        ? buildWorkflowPayload(input, extensions)
+        : buildAgentTurnPayload(input);
       const created = await cron.createJob({
         personId: context.person.id,
         name: input.name,
         schedule: input.schedule,
         timezone: input.timezone,
-        mode: input.mode,
-        target
+        sessionTarget: input.sessionTarget,
+        delivery: input.deliveryType === "telegram" ? { type: "telegram" } : { type: "none" },
+        payload
       });
 
       return {
@@ -81,14 +89,15 @@ export function createCronListTool(repository: CronRepository): Tool<z.infer<typ
     status: string;
     schedule: string;
     timezone: string;
-    mode: string;
-    targetType: string;
+    sessionTarget: string;
+    payloadKind: string;
+    deliveryType: string;
     nextRunAt: string;
   }>;
 }> {
   return {
     id: "cron.list",
-    description: "List recurring cron jobs for the current person, including schedule and next run time.",
+    description: "List recurring cron jobs for the current person, including schedule, delivery type, and next run time.",
     inputSchema: cronListSchema,
     inputJsonSchema: {
       type: "object",
@@ -111,8 +120,9 @@ export function createCronListTool(repository: CronRepository): Tool<z.infer<typ
           status: job.status,
           schedule: job.schedule,
           timezone: job.timezone,
-          mode: job.mode,
-          targetType: job.target.type,
+          sessionTarget: job.sessionTarget,
+          payloadKind: job.payload.kind,
+          deliveryType: job.delivery.type,
           nextRunAt: job.nextRunAt.toISOString()
         }));
 
@@ -156,6 +166,75 @@ export function createCronRunNowTool(cron: CronService, repository: CronReposito
   };
 }
 
+export function createCronRunsTool(repository: CronRepository): Tool<z.infer<typeof cronRunsSchema>, {
+  runs: Array<{
+    runId: string;
+    jobId: string;
+    jobName: string;
+    trigger: string;
+    status: string;
+    startedAt: string;
+    completedAt?: string;
+    output?: string;
+    error?: string;
+  }>;
+}> {
+  return {
+    id: "cron.runs",
+    description: "Inspect recent cron run results for the current person, either across all of their jobs or for one specific job, including output or delivery errors.",
+    inputSchema: cronRunsSchema,
+    inputJsonSchema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string", format: "uuid" },
+        limit: { type: "integer", minimum: 1, maximum: 50 }
+      },
+      additionalProperties: false
+    },
+    exposure: "conversation",
+    approvalPolicy: "never",
+    targetScope: "self",
+    async execute(input, context) {
+      if (!context.person) {
+        throw new Error("A resolved person is required to inspect cron runs.");
+      }
+
+      if (input.jobId) {
+        const job = await ensureOwnedJob(input.jobId, repository, context.person.id);
+        const runs = await repository.listRunsForJob(job.id, input.limit);
+        return {
+          runs: runs.map((run) => ({
+            runId: run.id,
+            jobId: run.jobId,
+            jobName: job.name,
+            trigger: run.trigger,
+            status: run.status,
+            startedAt: run.startedAt.toISOString(),
+            ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
+            ...(run.output ? { output: run.output } : {}),
+            ...(run.error ? { error: run.error } : {})
+          }))
+        };
+      }
+
+      const runs = await repository.listRunsForPerson(context.person.id, input.limit);
+      return {
+        runs: runs.map((run) => ({
+          runId: run.id,
+          jobId: run.jobId,
+          jobName: run.jobName,
+          trigger: run.trigger,
+          status: run.status,
+          startedAt: run.startedAt.toISOString(),
+          ...(run.completedAt ? { completedAt: run.completedAt.toISOString() } : {}),
+          ...(run.output ? { output: run.output } : {}),
+          ...(run.error ? { error: run.error } : {})
+        }))
+      };
+    }
+  };
+}
+
 function createCronStatusTool(
   id: string,
   description: string,
@@ -192,20 +271,20 @@ function createCronStatusTool(
   };
 }
 
-function buildPromptTarget(input: z.infer<typeof cronCreateSchema>) {
+function buildAgentTurnPayload(input: z.infer<typeof cronCreateSchema>) {
   if (!input.prompt || input.prompt.trim().length === 0) {
-    throw new Error("A prompt is required when targetType is 'prompt'.");
+    throw new Error("A prompt is required when payloadKind is 'agent_turn'.");
   }
 
   return {
-    type: "prompt" as const,
+    kind: "agent_turn" as const,
     prompt: input.prompt.trim()
   };
 }
 
-function buildWorkflowTarget(input: z.infer<typeof cronCreateSchema>, extensions: ExtensionRegistry) {
+function buildWorkflowPayload(input: z.infer<typeof cronCreateSchema>, extensions: ExtensionRegistry) {
   if (!input.workflowSkillName || input.workflowSkillName.trim().length === 0) {
-    throw new Error("workflowSkillName is required when targetType is 'workflow'.");
+    throw new Error("workflowSkillName is required when payloadKind is 'workflow'.");
   }
 
   const extension = extensions.get(input.workflowSkillName.trim());
@@ -218,7 +297,7 @@ function buildWorkflowTarget(input: z.infer<typeof cronCreateSchema>, extensions
   }
 
   return {
-    type: "workflow" as const,
+    kind: "workflow" as const,
     skillName: input.workflowSkillName.trim(),
     messageText: (input.workflowMessageText?.trim() || "Run the configured workflow now.")
   };

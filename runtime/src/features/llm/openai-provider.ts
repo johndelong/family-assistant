@@ -10,25 +10,22 @@ import type {
 interface OpenAiProviderOptions {
   apiKey: string;
   model: string;
-  directActionModel?: string;
 }
 
 export class OpenAiProvider implements LlmProvider {
   readonly name = "openai";
   readonly #client: OpenAI;
-  readonly #defaultModel: string;
-  readonly #directActionModel: string | undefined;
+  readonly #model: string;
 
   constructor(options: OpenAiProviderOptions) {
     this.#client = new OpenAI({
       apiKey: options.apiKey
     });
-    this.#defaultModel = options.model;
-    this.#directActionModel = options.directActionModel;
+    this.#model = options.model;
   }
 
   async generate(input: LlmGenerateParams): Promise<LlmGenerateResult> {
-    const model = this.#resolveModel(input.modelHint);
+    const model = this.#model;
     const response = await this.#client.responses.create({
       model,
       input: input.messages.map((message) => ({
@@ -55,7 +52,7 @@ export class OpenAiProvider implements LlmProvider {
       output: string;
     }>;
   }): Promise<LlmToolResponse> {
-    const model = this.#resolveModel(input.modelHint);
+    const model = this.#model;
     const response = await this.#client.responses.create({
       model,
       input: input.toolOutputs
@@ -93,13 +90,5 @@ export class OpenAiProvider implements LlmProvider {
       toolCalls,
       responseId: response.id
     };
-  }
-
-  #resolveModel(modelHint: "default" | "direct_action" | undefined): string {
-    if (modelHint === "direct_action" && this.#directActionModel) {
-      return this.#directActionModel;
-    }
-
-    return this.#defaultModel;
   }
 }

@@ -5,7 +5,6 @@ import { coreExtensionsDir, packageExtensionsDir, repositoryRootDir } from "../.
 
 export const SUPPORTED_EXTENSION_API_VERSION = "1";
 
-const requestModeSchema = z.enum(["default", "direct_action"]);
 const primitiveSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
 const toolMatchersSchema = z.object({
@@ -79,7 +78,6 @@ const workflowDefinitionSchema = z.object({
 
 const structuredExecutionSchema = z.object({
   runtime: z.enum(["constrained_tools", "workflow"]),
-  requestModes: z.array(requestModeSchema).optional(),
   integrationPrompts: z.enum(["matched_tools", "none"]).optional(),
   progressMessage: z.string().optional(),
   workflow: workflowDefinitionSchema.optional()
@@ -108,7 +106,6 @@ const extensionManifestSchema = z.object({
   executionGuards: z.array(executionGuardSchema).optional()
 });
 
-export type RequestMode = z.infer<typeof requestModeSchema>;
 export type SkillExecutionGuard = z.infer<typeof executionGuardSchema>;
 export type StructuredWorkflowStep = (
   | {
@@ -203,7 +200,6 @@ export interface ExtensionInspection {
   };
   structuredExecution?: {
     runtime: "constrained_tools" | "workflow";
-    requestModes: RequestMode[];
     integrationPrompts: "matched_tools" | "none";
     progressMessage?: string;
     workflow?: {
@@ -424,7 +420,6 @@ function inspectExtension(entry: RegisteredExtension): ExtensionInspection {
       ? {
           structuredExecution: {
             runtime: manifest.structuredExecution.runtime,
-            requestModes: manifest.structuredExecution.requestModes ?? [],
             integrationPrompts: manifest.structuredExecution.integrationPrompts ?? "matched_tools",
             ...(manifest.structuredExecution.progressMessage
               ? { progressMessage: manifest.structuredExecution.progressMessage }

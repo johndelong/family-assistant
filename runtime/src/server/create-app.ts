@@ -36,14 +36,22 @@ const cronJobCreateBodySchema = z.object({
   name: z.string().min(1),
   schedule: z.string().min(1),
   timezone: z.string().min(1),
-  mode: z.enum(["isolated", "main"]).default("isolated"),
-  target: z.discriminatedUnion("type", [
+  sessionTarget: z.enum(["isolated", "main"]).default("isolated"),
+  delivery: z.discriminatedUnion("type", [
     z.object({
-      type: z.literal("prompt"),
+      type: z.literal("none")
+    }),
+    z.object({
+      type: z.literal("telegram")
+    })
+  ]).default({ type: "none" }),
+  payload: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("agent_turn"),
       prompt: z.string().min(1)
     }),
     z.object({
-      type: z.literal("workflow"),
+      kind: z.literal("workflow"),
       skillName: z.string().min(1),
       messageText: z.string().min(1)
     })
@@ -82,7 +90,9 @@ export async function createApp({ context }: CreateAppOptions) {
   });
 
   await app.register(cors, {
-    origin: context.config.frontendOrigins.length > 0 ? context.config.frontendOrigins : false
+    origin: context.config.frontendOrigins.length > 0 ? context.config.frontendOrigins : false,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["authorization", "content-type"]
   });
   await app.register(websocket);
 
@@ -645,7 +655,6 @@ export async function createApp({ context }: CreateAppOptions) {
         openAiConfigured: Boolean(app.serverContext.config.openAiApiKey),
         braveSearchConfigured: Boolean(app.serverContext.config.braveApiKey),
         telegramConfigured: Boolean(app.serverContext.config.telegramBotToken),
-        directActionModel: app.serverContext.config.openAiDirectActionModel ?? null,
         defaultModel: app.serverContext.config.openAiModel
       },
       assistantIdentity: await app.serverContext.profiles.getAssistantIdentity(),
@@ -805,8 +814,9 @@ export async function createApp({ context }: CreateAppOptions) {
       name: body.name,
       schedule: body.schedule,
       timezone: body.timezone,
-      mode: body.mode,
-      target: body.target
+      sessionTarget: body.sessionTarget,
+      delivery: body.delivery,
+      payload: body.payload
     });
 
     return {
@@ -897,6 +907,25 @@ export async function createApp({ context }: CreateAppOptions) {
     return {
       jobId: params.jobId,
       status: "active"
+    };
+  });
+
+  app.delete("/admin/cron/jobs/:jobId", async (request, reply) => {
+    if (!app.serverContext.cronRepository) {
+      return reply.code(503).send({
+        error: "DATABASE_URL is required to manage cron jobs"
+      });
+    }
+
+    const params = z.object({
+      jobId: z.uuid()
+    }).parse(request.params);
+
+    await app.serverContext.cronRepository.deleteJob(params.jobId);
+
+    return {
+      jobId: params.jobId,
+      deleted: true
     };
   });
 

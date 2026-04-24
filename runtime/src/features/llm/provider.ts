@@ -6,7 +6,6 @@ export interface LlmMessage {
 export interface LlmGenerateParams {
   requestId: string;
   messages: LlmMessage[];
-  modelHint?: "default" | "direct_action";
 }
 
 export interface LlmGenerateResult {

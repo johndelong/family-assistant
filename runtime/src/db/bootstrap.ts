@@ -225,11 +225,17 @@ export async function ensureSchema(db: NodePgDatabase): Promise<void> {
       timezone varchar(120) not null,
       mode varchar(32) not null,
       target jsonb not null,
+      delivery jsonb not null default '{"type":"none"}'::jsonb,
       last_run_at timestamptz,
       next_run_at timestamptz not null,
       created_at timestamptz not null,
       updated_at timestamptz not null
     )
+  `);
+
+  await db.execute(sql`
+    alter table cron_jobs
+      add column if not exists delivery jsonb not null default '{"type":"none"}'::jsonb
   `);
 
   await db.execute(sql`

@@ -15,7 +15,6 @@ const appConfigSchema = z.object({
   ENCRYPTION_MASTER_KEY: z.string().min(32).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().default("gpt-5-mini"),
-  OPENAI_DIRECT_ACTION_MODEL: z.string().min(1).optional(),
   FRONTEND_ORIGINS: z.string().optional(),
   CRON_ENABLED: z.coerce.boolean().default(true),
   CRON_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
@@ -35,7 +34,6 @@ export interface AppConfig {
   encryptionMasterKey?: string;
   openAiApiKey?: string;
   openAiModel: string;
-  openAiDirectActionModel?: string;
   frontendOrigins: string[];
   cronEnabled: boolean;
   cronPollIntervalMs: number;
@@ -64,7 +62,6 @@ export function loadAppConfig(source: NodeJS.ProcessEnv = process.env): AppConfi
     ...(parsed.DATABASE_URL ? { databaseUrl: parsed.DATABASE_URL } : {}),
     ...(parsed.ENCRYPTION_MASTER_KEY ? { encryptionMasterKey: parsed.ENCRYPTION_MASTER_KEY } : {}),
     ...(parsed.OPENAI_API_KEY ? { openAiApiKey: parsed.OPENAI_API_KEY } : {}),
-    ...(parsed.OPENAI_DIRECT_ACTION_MODEL ? { openAiDirectActionModel: parsed.OPENAI_DIRECT_ACTION_MODEL } : {}),
     ...(parsed.BRAVE_API_KEY ? { braveApiKey: parsed.BRAVE_API_KEY } : {}),
     ...(parsed.ADMIN_API_TOKEN ? { adminApiToken: parsed.ADMIN_API_TOKEN } : {}),
     ...(parsed.TELEGRAM_BOT_TOKEN ? { telegramBotToken: parsed.TELEGRAM_BOT_TOKEN } : {})

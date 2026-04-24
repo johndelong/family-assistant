@@ -83,6 +83,25 @@ export class SessionService {
     await this.#compactIfNeeded(input.sessionId);
   }
 
+  async resetContext(input: {
+    person: Person;
+    message: InboundMessage;
+  }): Promise<boolean> {
+    const session = await this.sessions.findSessionByParticipant({
+      personId: input.person.id,
+      channelType: input.message.channelType,
+      externalUserId: input.message.externalUserId,
+      ...(input.message.chatId ? { chatId: input.message.chatId } : {})
+    });
+
+    if (!session) {
+      return false;
+    }
+
+    await this.sessions.deleteSession(session.id);
+    return true;
+  }
+
   async #compactIfNeeded(sessionId: string): Promise<void> {
     if (!this.summarizer) {
       return;

@@ -98,6 +98,28 @@ export class SessionRepository {
     return record;
   }
 
+  async findSessionByParticipant(input: {
+    personId: string;
+    channelType: ChannelType;
+    externalUserId: string;
+    chatId?: string;
+  }): Promise<ConversationSessionRecord | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(conversationSessions)
+      .where(and(
+        eq(conversationSessions.personId, input.personId),
+        eq(conversationSessions.channelType, input.channelType),
+        eq(conversationSessions.externalUserId, input.externalUserId),
+        input.chatId
+          ? eq(conversationSessions.chatId, input.chatId)
+          : sql`${conversationSessions.chatId} is null`
+      ))
+      .limit(1);
+
+    return row ? mapSession(row) : undefined;
+  }
+
   async appendMessage(input: {
     sessionId: string;
     role: SessionMessageRole;
@@ -171,5 +193,10 @@ export class SessionRepository {
     }
 
     await this.db.delete(sessionMessages).where(inArray(sessionMessages.id, messageIds));
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.db.delete(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
+    await this.db.delete(conversationSessions).where(eq(conversationSessions.id, sessionId));
   }
 }

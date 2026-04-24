@@ -58,7 +58,6 @@ export class LlmService {
     toolRegistry: ToolRegistry;
     allowedToolIds?: string[] | undefined;
     integrationPromptSections?: string[] | undefined;
-    requestMode?: "default" | "direct_action";
     relevantMemories?: RetrievedMemory[] | undefined;
     profileContext?: PromptProfileContext | undefined;
     sessionContext?: SessionContext | undefined;
@@ -100,8 +99,7 @@ export class LlmService {
       messageText: input.message.text,
       person: input.person,
       tools: conversationTools,
-      sessionContext: input.sessionContext,
-      ...(input.requestMode === "direct_action" ? { maxTools: 12 } : {})
+      sessionContext: input.sessionContext
     });
 
     const skillContext = applyToolSkills({
@@ -133,7 +131,6 @@ export class LlmService {
 
     let response = await this.provider.generateWithTools({
       requestId: input.requestId,
-      ...(input.requestMode ? { modelHint: input.requestMode } : {}),
       messages: [
         {
           role: "system",
@@ -246,7 +243,6 @@ export class LlmService {
 
       const followUpInput: Parameters<LlmProvider["generateWithTools"]>[0] = {
         requestId: input.requestId,
-        ...(input.requestMode ? { modelHint: input.requestMode } : {}),
         messages: [],
         tools,
         toolOutputs

@@ -84,79 +84,6 @@ export class OrchestrationService {
     onProgress?: ((message: string) => Promise<void>) | undefined;
   }): Promise<OrchestratedResponse> {
     const rawText = input.message.text.trim();
-    const normalizedText = rawText.toLowerCase();
-    const requestMode = classifyRequestMode(rawText);
-
-    if (
-      normalizedText === "health" ||
-      normalizedText === "status" ||
-      normalizedText === "system health" ||
-      normalizedText === "are you healthy?"
-    ) {
-      const result = await this.toolRegistry.execute("system.health", {}, {
-        requestId: input.requestId,
-        invocationSource: "conversation",
-        person: input.person
-      }) as { status: string; service: string; timestamp: string };
-
-      return {
-        route: "tool_execution",
-        content: `System health is ${result.status} for ${result.service} as of ${result.timestamp}.`
-      };
-    }
-
-    if (normalizedText.startsWith("remember ")) {
-      const memoryDirective = parseRememberDirective(rawText);
-
-      if (!memoryDirective || memoryDirective.content.length === 0) {
-        return {
-          route: "direct_response",
-          content: "Tell me what you want me to remember after the word 'remember'."
-        };
-      }
-
-      const result = await this.toolRegistry.execute("memory.store", {
-        content: memoryDirective.content,
-        scope: memoryDirective.scope
-      }, {
-        requestId: input.requestId,
-        invocationSource: "conversation",
-        person: input.person
-      }) as { memoryId: string; createdAt: string; scope: "private" | "shared" };
-
-      return {
-        route: "tool_execution",
-        content: result.scope === "shared"
-          ? `I saved that to shared household memory with id ${result.memoryId} at ${result.createdAt}.`
-          : `I saved that to your private memory with id ${result.memoryId} at ${result.createdAt}.`
-      };
-    }
-
-    if (
-      normalizedText === "search my memory" ||
-      normalizedText === "show my memories" ||
-      normalizedText === "what do you remember about me?"
-    ) {
-      const result = await this.toolRegistry.execute("memory.search", {}, {
-        requestId: input.requestId,
-        invocationSource: "conversation",
-        person: input.person
-      }) as { memories: Array<{ scope: string; content: string; createdAt: string }> };
-
-      if (result.memories.length === 0) {
-        return {
-          route: "tool_execution",
-          content: "I do not have any memory stored for you yet."
-        };
-      }
-
-      const lines = result.memories.map((memory, index) => `${index + 1}. [${memory.scope}] ${memory.content} (${memory.createdAt})`);
-      return {
-        route: "tool_execution",
-        content: `Here is the memory I found for you:\n${lines.join("\n")}`
-      };
-    }
-
     if (this.llmService) {
       const profileContext = this.promptProfileService
         ? await this.promptProfileService.buildContextForPerson(input.person)
@@ -176,7 +103,6 @@ export class OrchestrationService {
         : [];
       const structuredExecution = this.structuredExecutionService?.resolve({
         messageText: input.message.text,
-        requestMode,
         sessionContext,
         tools: this.toolRegistry.listConversationTools()
       }) ?? null;
@@ -207,10 +133,7 @@ export class OrchestrationService {
 
       if (structuredExecution?.runtime === "workflow" && this.structuredExecutionService) {
         await input.onProgress?.(
-          structuredExecution.progressMessage ??
-          (requestMode === "direct_action"
-            ? "Taking action..."
-            : "Thinking through that...")
+          structuredExecution.progressMessage ?? "Thinking through that..."
         );
 
         const workflowResult = await this.structuredExecutionService.execute({
@@ -360,10 +283,7 @@ export class OrchestrationService {
       }
 
       await input.onProgress?.(
-        structuredExecution?.progressMessage ??
-        (requestMode === "direct_action"
-          ? "Taking action..."
-          : "Thinking through that...")
+        structuredExecution?.progressMessage ?? "Thinking through that..."
       );
 
       const integrationPromptSections = structuredExecution && this.mcpPromptService && structuredExecution.integrationPrompts === "matched_tools"
@@ -382,15 +302,12 @@ export class OrchestrationService {
         ...(integrationPromptSections.length > 0
           ? { integrationPromptSections: integrationPromptSections.map((item) => item.content) }
           : {}),
-        requestMode,
         relevantMemories,
         profileContext,
         sessionContext,
         onProgress: input.onProgress
       });
-      const finalText = shouldRequireToolBackedCompletion(rawText, response.usedTools)
-        ? "I wasn't able to verify that action through tools yet, so I don't want to claim it completed. Please try again, or ask me to check the current state first."
-        : response.text;
+      const finalText = response.text;
 
       if (sessionContext) {
         await this.sessionService?.recordTurn({
@@ -693,117 +610,4 @@ export class OrchestrationService {
       ...(result.trace ? { trace: result.trace } : {})
     };
   }
-}
-
-function classifyRequestMode(messageText: string): "default" | "direct_action" {
-  const normalized = messageText.trim().toLowerCase();
-  if (normalized.length === 0) {
-    return "default";
-  }
-
-  const likelyQuestion = /^(what|when|where|why|how|who|which)\b/.test(normalized) || normalized.includes("?");
-  if (likelyQuestion) {
-    return "default";
-  }
-
-  const directActionPatterns = [
-    /\bturn (on|off)\b/,
-    /\bswitch (on|off)\b/,
-    /\bset\b/,
-    /\bdim\b/,
-    /\bbrighten\b/,
-    /\bsend\b/,
-    /\bemail\b/,
-    /\btext\b/,
-    /\bannounce\b/,
-    /\bbroadcast\b/,
-    /\bcreate\b/,
-    /\bschedule\b/,
-    /\bcancel\b/,
-    /\bdelete\b/,
-    /\bremove\b/,
-    /\bstart\b/,
-    /\bstop\b/,
-    /\block\b/,
-    /\bunlock\b/,
-    /\bopen\b/,
-    /\bclose\b/
-  ];
-
-  return directActionPatterns.some((pattern) => pattern.test(normalized))
-    ? "direct_action"
-    : "default";
-}
-
-function shouldRequireToolBackedCompletion(messageText: string, usedTools: string[]): boolean {
-  if (usedTools.length > 0) {
-    return false;
-  }
-
-  const normalized = messageText.trim().toLowerCase();
-
-  if (normalized.length === 0) {
-    return false;
-  }
-
-  const actionPhrases = [
-    "turn on",
-    "turn off",
-    "switch on",
-    "switch off",
-    "set ",
-    "dim ",
-    "brighten",
-    "open ",
-    "close ",
-    "lock ",
-    "unlock ",
-    "send ",
-    "email ",
-    "text ",
-    "broadcast",
-    "announce",
-    "create ",
-    "schedule ",
-    "cancel ",
-    "delete ",
-    "remove ",
-    "start ",
-    "stop "
-  ];
-
-  return actionPhrases.some((phrase) => normalized.includes(phrase));
-}
-
-function parseRememberDirective(text: string): { content: string; scope: "private" | "shared" } | null {
-  const trimmed = text.trim();
-  const lowered = trimmed.toLowerCase();
-
-  if (!lowered.startsWith("remember ")) {
-    return null;
-  }
-
-  const patterns: Array<{ pattern: RegExp; scope: "private" | "shared" }> = [
-    { pattern: /^remember\s+for\s+the\s+family\s+that\s+(.+)$/i, scope: "shared" },
-    { pattern: /^remember\s+for\s+the\s+household\s+that\s+(.+)$/i, scope: "shared" },
-    { pattern: /^remember\s+for\s+us\s+that\s+(.+)$/i, scope: "shared" },
-    { pattern: /^remember\s+this\s+for\s+the\s+family:?\s+(.+)$/i, scope: "shared" },
-    { pattern: /^remember\s+this\s+for\s+the\s+household:?\s+(.+)$/i, scope: "shared" },
-    { pattern: /^remember\s+this\s+for\s+us:?\s+(.+)$/i, scope: "shared" }
-  ];
-
-  for (const candidate of patterns) {
-    const match = trimmed.match(candidate.pattern);
-    if (match?.[1]) {
-      return {
-        content: match[1].trim(),
-        scope: candidate.scope
-      };
-    }
-  }
-
-  return {
-    content: trimmed.slice("remember ".length).trim(),
-    scope: "private"
-  };
 }

@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 import { resolve } from "node:path";
 import type { AppConfig } from "../shared/config.js";
 import { coreExtensionsDir, packageExtensionsDir } from "../shared/paths.js";
+import { ChannelRouter } from "../channels/router.js";
 import { createDatabaseClient } from "../db/client.js";
 import { ensureSchema } from "../db/bootstrap.js";
 import { ToolRegistry } from "../core/tools.js";
@@ -41,6 +42,7 @@ export interface ServerContext {
   config: AppConfig;
   logger: Logger;
   toolRegistry: ToolRegistry;
+  channels: ChannelRouter;
   mcpRuntime?: McpRuntimeManager;
   households?: HouseholdRepository;
   persons?: PersonRepository;
@@ -57,6 +59,7 @@ export interface ServerContext {
   structuredExecutionRuns?: StructuredExecutionRunRepository;
   monitor?: MonitorEventHub;
   identityResolution?: IdentityResolutionService;
+  sessionService?: SessionService;
   orchestration?: OrchestrationService;
   requestIntake?: RequestIntakeService;
   close(): Promise<void>;
@@ -64,6 +67,7 @@ export interface ServerContext {
 
 export async function createServerContext(config: AppConfig, logger: Logger): Promise<ServerContext> {
   const toolRegistry = new ToolRegistry();
+  const channels = new ChannelRouter();
   const mcpRuntime = new McpRuntimeManager();
   const extensionStates = new ExtensionStateStore(resolve(config.dataDir, "extension-state.json"));
   await extensionStates.load();
@@ -92,6 +96,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
       config,
       logger,
       toolRegistry,
+      channels,
       mcpRuntime,
       extensionRegistry,
       extensionManager,
@@ -132,8 +137,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const provider = config.openAiApiKey
     ? new OpenAiProvider({
         apiKey: config.openAiApiKey,
-        model: config.openAiModel,
-        ...(config.openAiDirectActionModel ? { directActionModel: config.openAiDirectActionModel } : {})
+        model: config.openAiModel
       })
     : undefined;
   const llmService = provider ? new LlmService(provider, extensionRegistry) : undefined;
@@ -157,6 +161,8 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
   const cron = new CronService(
     cronRepository,
     persons,
+    identities,
+    channels,
     orchestration,
     traceWriter,
     monitor,
@@ -184,6 +190,7 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
     config,
     logger,
     toolRegistry,
+    channels,
     mcpRuntime,
     households,
     persons,
@@ -198,10 +205,11 @@ export async function createServerContext(config: AppConfig, logger: Logger): Pr
     runtimePreferences: personPreferences,
     traces,
     structuredExecutionRuns,
-    monitor,
-    identityResolution,
-    orchestration,
-    requestIntake,
+      monitor,
+      identityResolution,
+      sessionService,
+      orchestration,
+      requestIntake,
     async close() {
       await cron.stop();
       await mcpRuntime.stopAll();

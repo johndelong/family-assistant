@@ -29,9 +29,6 @@
   "forceIncludeMatchingTools": true,
   "structuredExecution": {
     "runtime": "constrained_tools",
-    "requestModes": [
-      "direct_action"
-    ],
     "integrationPrompts": "matched_tools",
     "progressMessage": "Taking action..."
   },

@@ -63,7 +63,13 @@ type CronResponse = {
     status: string;
     schedule: string;
     timezone: string;
-    mode: string;
+    sessionTarget: string;
+    payload: {
+      kind: string;
+    };
+    delivery: {
+      type: string;
+    };
     nextRunAt: string;
   }>;
 };
@@ -117,7 +123,6 @@ type SettingsResponse = {
     openAiConfigured: boolean;
     braveSearchConfigured: boolean;
     telegramConfigured: boolean;
-    directActionModel: string | null;
     defaultModel: string;
   };
   assistantIdentity: {
@@ -623,6 +628,36 @@ export function App() {
     );
   };
 
+  const updateCronJobStatus = async (jobId: string, status: "active" | "paused") => {
+    await run(
+      `cron-${jobId}-${status}`,
+      () => api.post(`/admin/cron/jobs/${jobId}/${status === "active" ? "resume" : "pause"}`, {}),
+      () => {
+        notifications.show({
+          color: "teal",
+          title: status === "active" ? "Cron resumed" : "Cron paused",
+          message: `Job is now ${status}.`
+        });
+        refreshCronJobs();
+      }
+    );
+  };
+
+  const deleteCronJob = async (jobId: string) => {
+    await run(
+      `cron-delete-${jobId}`,
+      () => api.delete(`/admin/cron/jobs/${jobId}`),
+      () => {
+        notifications.show({
+          color: "teal",
+          title: "Cron deleted",
+          message: "Cron job removed."
+        });
+        refreshCronJobs();
+      }
+    );
+  };
+
   async function handleLogin() {
     setLoading((current) => ({ ...current, login: true }));
     try {
@@ -805,9 +840,28 @@ export function App() {
                           <Text fw={700}>{job.name}</Text>
                           <Badge color={job.status === "active" ? "teal" : "gray"} variant="light">{job.status}</Badge>
                         </Group>
-                        <Text size="sm" c="dimmed" mt={6}>{job.schedule} • {job.timezone} • {job.mode}</Text>
+                        <Text size="sm" c="dimmed" mt={6}>{job.schedule} • {job.timezone} • {job.sessionTarget} • payload: {job.payload.kind} • delivery: {job.delivery.type}</Text>
                       </div>
-                      <Code>{new Date(job.nextRunAt).toLocaleString()}</Code>
+                      <Stack gap={6} align="end">
+                        <Code>{new Date(job.nextRunAt).toLocaleString()}</Code>
+                        <Group gap="xs">
+                          <Button
+                            size="xs"
+                            variant="light"
+                            onClick={() => void updateCronJobStatus(job.id, job.status === "active" ? "paused" : "active")}
+                          >
+                            {job.status === "active" ? "Pause" : "Resume"}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="red"
+                            onClick={() => void deleteCronJob(job.id)}
+                          >
+                            Delete
+                          </Button>
+                        </Group>
+                      </Stack>
                     </Group>
                   </Card>
                 ))}
@@ -1027,7 +1081,6 @@ export function App() {
                       <SettingRow label="Bind" value={`${settings.runtime.host}:${settings.runtime.port}`} />
                       <SettingRow label="Log Level" value={settings.runtime.logLevel} />
                       <SettingRow label="Default Model" value={settings.runtime.defaultModel} />
-                      <SettingRow label="Direct Action Model" value={settings.runtime.directActionModel ?? "None"} />
                       <SettingRow label="Cron" value={settings.runtime.cronEnabled ? `Enabled • ${settings.runtime.cronPollIntervalMs}ms` : "Disabled"} />
                       <SettingRow label="Database" value={settings.runtime.databaseConfigured ? "Configured" : "Missing"} />
                       <SettingRow label="OpenAI" value={settings.runtime.openAiConfigured ? "Configured" : "Missing"} />
@@ -1141,6 +1194,22 @@ function createApi(runtimeUrl: string, adminToken: string) {
           "content-type": "application/json"
         },
         body: JSON.stringify(body)
+      });
+      const text = await response.text();
+      const payload = text.length > 0 ? JSON.parse(text) : null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Request failed with status ${response.status}`);
+      }
+
+      return payload as T;
+    },
+    async delete<T>(path: string): Promise<T> {
+      const response = await fetch(new URL(path, runtimeUrl), {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${adminToken}`
+        }
       });
       const text = await response.text();
       const payload = text.length > 0 ? JSON.parse(text) : null;

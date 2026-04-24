@@ -4,6 +4,7 @@ import {
   createCronListTool,
   createCronPauseTool,
   createCronResumeTool,
+  createCronRunsTool,
   createCronRunNowTool
 } from "./cron-tools.js";
 
@@ -16,5 +17,6 @@ export function registerTools(input: ExtensionToolRuntimeContext): void {
   input.toolRegistry.register(createCronListTool(input.cronRepository));
   input.toolRegistry.register(createCronPauseTool(input.cronRepository));
   input.toolRegistry.register(createCronResumeTool(input.cronRepository));
+  input.toolRegistry.register(createCronRunsTool(input.cronRepository));
   input.toolRegistry.register(createCronRunNowTool(input.cron, input.cronRepository));
 }

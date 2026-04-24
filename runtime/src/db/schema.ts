@@ -150,6 +150,7 @@ export const cronJobs = pgTable("cron_jobs", {
   timezone: varchar("timezone", { length: 120 }).notNull(),
   mode: varchar("mode", { length: 32 }).notNull(),
   target: jsonb("target").notNull(),
+  delivery: jsonb("delivery").notNull(),
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),

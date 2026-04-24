@@ -19,8 +19,11 @@ async function main(): Promise<void> {
       telegramAdapter = new TelegramAdapter({
         botToken: config.telegramBotToken,
         logger,
-        requestIntake: context.requestIntake
+        requestIntake: context.requestIntake,
+        identityResolution: context.identityResolution!,
+        sessionService: context.sessionService
       });
+      context.channels.register(telegramAdapter);
       await telegramAdapter.start();
       logger.info("telegram adapter started");
     }
@@ -31,6 +34,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     if (telegramAdapter) {
+      context.channels.unregister("telegram");
       await telegramAdapter.stop();
     }
     await app.close();

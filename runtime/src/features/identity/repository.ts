@@ -200,4 +200,14 @@ export class IdentityRepository {
     const rows = await this.db.select().from(channelIdentities).orderBy(asc(channelIdentities.createdAt));
     return rows.map(mapChannelIdentity);
   }
+
+  async listIdentitiesForPerson(personId: string): Promise<ChannelIdentity[]> {
+    const rows = await this.db
+      .select()
+      .from(channelIdentities)
+      .where(eq(channelIdentities.personId, personId))
+      .orderBy(asc(channelIdentities.createdAt));
+
+    return rows.map(mapChannelIdentity);
+  }
 }

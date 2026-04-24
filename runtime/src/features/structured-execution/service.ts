@@ -3,7 +3,7 @@ import type { Person } from "../../core/domain.js";
 import type { Tool } from "../../core/tools.js";
 import type { ToolRegistry } from "../../core/tools.js";
 import type { DirectActionTrace } from "../direct-actions/executor.js";
-import type { ExtensionManifest, ExtensionRegistry, RequestMode, StructuredWorkflowDefinition, StructuredWorkflowStep } from "../extensions/registry.js";
+import type { ExtensionManifest, ExtensionRegistry, StructuredWorkflowDefinition, StructuredWorkflowStep } from "../extensions/registry.js";
 import type { SessionContext } from "../sessions/service.js";
 
 export type StructuredExecutionPlan =
@@ -57,7 +57,6 @@ export class StructuredExecutionService {
 
   resolve(input: {
     messageText: string;
-    requestMode: RequestMode;
     sessionContext?: SessionContext | undefined;
     tools: Tool<unknown, unknown>[];
   }): StructuredExecutionPlan | null {
@@ -65,10 +64,6 @@ export class StructuredExecutionService {
       const manifest = extension.manifest;
       const definition = manifest.structuredExecution;
       if (!definition) {
-        continue;
-      }
-
-      if (definition.requestModes && !definition.requestModes.includes(input.requestMode)) {
         continue;
       }
 

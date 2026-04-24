@@ -4,19 +4,27 @@ import { randomUUID } from "node:crypto";
 import { cronJobs, cronRuns } from "../../db/schema.js";
 
 export type CronJobStatus = "active" | "paused";
-export type CronJobMode = "isolated" | "main";
+export type CronJobSessionTarget = "isolated" | "main";
 export type CronRunStatus = "running" | "completed" | "failed";
 export type CronRunTrigger = "scheduled" | "manual";
 
-export type CronJobTarget =
+export type CronJobPayload =
   | {
-      type: "prompt";
+      kind: "agent_turn";
       prompt: string;
     }
   | {
-      type: "workflow";
+      kind: "workflow";
       skillName: string;
       messageText: string;
+    };
+
+export type CronJobDelivery =
+  | {
+      type: "none";
+    }
+  | {
+      type: "telegram";
     };
 
 export interface CronJob {
@@ -26,8 +34,9 @@ export interface CronJob {
   status: CronJobStatus;
   schedule: string;
   timezone: string;
-  mode: CronJobMode;
-  target: CronJobTarget;
+  sessionTarget: CronJobSessionTarget;
+  payload: CronJobPayload;
+  delivery: CronJobDelivery;
   lastRunAt?: Date;
   nextRunAt: Date;
   createdAt: Date;
@@ -55,8 +64,9 @@ function mapCronJob(row: typeof cronJobs.$inferSelect): CronJob {
     status: row.status as CronJobStatus,
     schedule: row.schedule,
     timezone: row.timezone,
-    mode: row.mode as CronJobMode,
-    target: row.target as CronJobTarget,
+    sessionTarget: row.mode as CronJobSessionTarget,
+    payload: row.target as CronJobPayload,
+    delivery: (row.delivery as CronJobDelivery | null) ?? { type: "none" },
     ...(row.lastRunAt ? { lastRunAt: row.lastRunAt } : {}),
     nextRunAt: row.nextRunAt,
     createdAt: row.createdAt,
@@ -87,8 +97,9 @@ export class CronRepository {
     name: string;
     schedule: string;
     timezone: string;
-    mode: CronJobMode;
-    target: CronJobTarget;
+    sessionTarget: CronJobSessionTarget;
+    payload: CronJobPayload;
+    delivery: CronJobDelivery;
     nextRunAt: Date;
   }): Promise<CronJob> {
     const now = new Date();
@@ -100,8 +111,9 @@ export class CronRepository {
       status: "active",
       schedule: input.schedule,
       timezone: input.timezone,
-      mode: input.mode,
-      target: input.target,
+      mode: input.sessionTarget,
+      target: input.payload,
+      delivery: input.delivery,
       nextRunAt: input.nextRunAt,
       createdAt: now,
       updatedAt: now
@@ -114,8 +126,9 @@ export class CronRepository {
       status: "active",
       schedule: input.schedule,
       timezone: input.timezone,
-      mode: input.mode,
-      target: input.target,
+      sessionTarget: input.sessionTarget,
+      payload: input.payload,
+      delivery: input.delivery,
       nextRunAt: input.nextRunAt,
       createdAt: now,
       updatedAt: now
@@ -239,5 +252,28 @@ export class CronRepository {
       .limit(limit);
 
     return rows.map(mapCronRun);
+  }
+
+  async listRunsForPerson(personId: string, limit = 20): Promise<Array<CronRun & { jobName: string }>> {
+    const rows = await this.db
+      .select({
+        run: cronRuns,
+        jobName: cronJobs.name
+      })
+      .from(cronRuns)
+      .innerJoin(cronJobs, eq(cronRuns.jobId, cronJobs.id))
+      .where(eq(cronJobs.personId, personId))
+      .orderBy(desc(cronRuns.startedAt))
+      .limit(limit);
+
+    return rows.map((row) => ({
+      ...mapCronRun(row.run),
+      jobName: row.jobName
+    }));
+  }
+
+  async deleteJob(id: string): Promise<void> {
+    await this.db.delete(cronRuns).where(eq(cronRuns.jobId, id));
+    await this.db.delete(cronJobs).where(eq(cronJobs.id, id));
   }
 }

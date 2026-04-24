@@ -164,7 +164,7 @@ export class RequestIntakeService {
       requestId: input.requestId,
       pairingCode: resolution.pairingRequest.code,
       expiresAt: resolution.pairingRequest.expiresAt.toISOString(),
-      message: `Identity not linked. Pair this sender with: family-assistant identity pair --code ${resolution.pairingRequest.code} --person <person-id-or-name>`
+      message: `Identity not linked. Use the admin UI to pair this sender with code ${resolution.pairingRequest.code}.`
     };
   }
 }

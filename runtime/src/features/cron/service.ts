@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { CronExpressionParser } from "cron-parser";
+import type { ChannelRouter } from "../../channels/router.js";
 import type { InboundMessage } from "../../core/channels.js";
 import type { Person } from "../../core/domain.js";
+import type { IdentityRepository } from "../identity/repository.js";
 import type { MonitorEventHub } from "../monitor/hub.js";
 import type { OrchestrationService } from "../orchestration/service.js";
 import type { PersonRepository } from "../persons/repository.js";
 import type { TraceWriter } from "../tracing/writer.js";
-import type { CronJob, CronJobMode, CronJobTarget, CronRepository } from "./repository.js";
+import type { CronJob, CronJobDelivery, CronJobPayload, CronJobSessionTarget, CronRepository } from "./repository.js";
 
 export class CronService {
   #timer: NodeJS.Timeout | undefined;
@@ -15,6 +17,8 @@ export class CronService {
   constructor(
     private readonly repository: CronRepository,
     private readonly persons: PersonRepository,
+    private readonly identities: IdentityRepository,
+    private readonly channels: ChannelRouter,
     private readonly orchestration: OrchestrationService,
     private readonly traceWriter?: TraceWriter,
     private readonly monitorHub?: MonitorEventHub,
@@ -39,8 +43,9 @@ export class CronService {
     name: string;
     schedule: string;
     timezone: string;
-    mode: CronJobMode;
-    target: CronJobTarget;
+    sessionTarget: CronJobSessionTarget;
+    payload: CronJobPayload;
+    delivery: CronJobDelivery;
   }): Promise<CronJob> {
     const nextRunAt = this.computeNextRun({
       schedule: input.schedule,
@@ -139,32 +144,33 @@ export class CronService {
       payload: {
         channelType: "websocket",
         externalUserId: `cron:${job.id}:run:${run.id}`,
-        text: describeCronTarget(job.target)
+        text: describeCronPayload(job.payload)
       }
     }).catch(() => undefined);
 
     try {
-      const result = job.target.type === "workflow"
+      const result = job.payload.kind === "workflow"
         ? await this.orchestration.executeStructuredWorkflowTarget({
             requestId,
             person,
-            skillName: job.target.skillName,
-            messageText: job.target.messageText
+            skillName: job.payload.skillName,
+            messageText: job.payload.messageText
           })
         : await this.orchestration.processResolvedMessage({
             requestId,
             person,
             message: {
               channelType: "websocket",
-              externalUserId: job.mode === "isolated"
+              externalUserId: job.sessionTarget === "isolated"
                 ? `cron:${job.id}:run:${run.id}`
                 : `cron:${job.id}`,
-              text: renderCronTarget(job.target),
+              text: renderCronPayload(job.payload),
               receivedAt: new Date(),
               metadata: {
                 cronJobId: job.id,
                 cronRunId: run.id,
-                cronTrigger: trigger
+                cronTrigger: trigger,
+                cronSessionTarget: job.sessionTarget
               }
             } satisfies InboundMessage
           });
@@ -181,6 +187,7 @@ export class CronService {
         status: normalizedResult.status === "failed" ? "failed" : "completed",
         output: normalizedResult.content
       });
+      await this.#deliverOutput(person, job, normalizedResult.content);
       this.monitorHub?.publish({
         type: "cron.run",
         event: {
@@ -217,27 +224,48 @@ export class CronService {
       throw error;
     }
   }
+
+  async #deliverOutput(person: Person, job: CronJob, output: string): Promise<void> {
+    if (job.delivery.type === "none") {
+      return;
+    }
+
+    if (job.delivery.type === "telegram") {
+      const identities = await this.identities.listIdentitiesForPerson(person.id);
+      const telegramIdentity = identities.find((identity) => identity.channelType === "telegram");
+      if (!telegramIdentity) {
+        throw new Error(`No linked Telegram identity found for ${person.name}`);
+      }
+
+      await this.channels.sendMessage({
+        channelType: "telegram",
+        externalId: telegramIdentity.externalId
+      }, {
+        text: output
+      });
+    }
+  }
 }
 
-function renderCronTarget(target: CronJobTarget): string {
-  if (target.type === "prompt") {
-    return target.prompt;
+function renderCronPayload(payload: CronJobPayload): string {
+  if (payload.kind === "agent_turn") {
+    return payload.prompt;
   }
 
-  if (target.type === "workflow") {
-    return target.messageText;
+  if (payload.kind === "workflow") {
+    return payload.messageText;
   }
 
   return "";
 }
 
-function describeCronTarget(target: CronJobTarget): string {
-  if (target.type === "prompt") {
-    return target.prompt;
+function describeCronPayload(payload: CronJobPayload): string {
+  if (payload.kind === "agent_turn") {
+    return payload.prompt;
   }
 
-  if (target.type === "workflow") {
-    return `${target.skillName}: ${target.messageText}`;
+  if (payload.kind === "workflow") {
+    return `${payload.skillName}: ${payload.messageText}`;
   }
 
   return "cron job";
